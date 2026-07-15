@@ -483,6 +483,15 @@ button {
   max-width: 85%;
 }
 .msg--pre { white-space: pre-line; }
+.msg--help ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.msg--help ul ul { margin-top: 9px; }
+.msg--help li { line-height: 1.55; }
 .msg--file {
   display: inline-flex;
   align-items: center;

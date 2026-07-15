@@ -1141,8 +1141,10 @@ function composeFactsText() {
 /* ================= Сценарий №14: справка ================= */
 
 function startHelp() {
-  const el = addMessage('assistant', HELP_TEXT);
-  el.classList.add('msg--pre');
+  const el = addMessage('assistant', '');
+  el.classList.add('msg--help');
+  el.innerHTML = HELP_HTML;
+  scrollFeed();
 }
 
 /* ================= Сценарий №3: разбор DOCX (по скрепке) ================= */
@@ -1302,6 +1304,10 @@ function runStarAction(action) {
     case 'check-doc':
       addMessage('user', 'Проверить документ');
       startCheckDoc();
+      break;
+    case 'create-line':
+      addMessage('user', 'Новая линия защиты');
+      startCreateLine();
       break;
   }
 }
