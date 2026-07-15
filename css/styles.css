@@ -314,6 +314,21 @@ button {
   margin-bottom: 10px;
 }
 
+/* --- Просительная часть --- */
+.doc-pleas {
+  margin-top: 22px;
+  padding: 16px 2px 6px;
+  border-top: 1px solid var(--border-strong);
+  line-height: 1.6;
+  outline: none;
+}
+.doc-pleas__intro {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.doc-pleas ol { padding-left: 24px; }
+.doc-pleas li { margin: 6px 0; }
+
 .doc-empty {
   border: 1px dashed var(--border-strong);
   border-radius: 10px;

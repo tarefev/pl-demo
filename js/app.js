@@ -14,6 +14,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 
 const switcherTabsEl = $('#demo-switcher-tabs');
 const docBlocksEl = $('#doc-blocks');
+const docPleasEl = $('#doc-pleas');
 const feedEl = $('#assistant-feed');
 const assistantScrollEl = $('#assistant-scroll');
 const contextEl = $('#input-context');
@@ -35,6 +36,7 @@ const state = {
   tabIndex: 0,
   card: null,          // рабочая копия карточки дела (в чате не показывается)
   blocks: null,        // рабочая копия блоков документа
+  pleas: null,         // пункты просительной части
   boundLines: null,    // Set id линий, уже привязанных к блокам
   activeBlockId: null,
   docType: null,       // { key, label } после стартового сценария
@@ -65,6 +67,7 @@ function resetDemo(tabIndex) {
   state.tabIndex = tabIndex;
   state.card = clone(tab.card);
   state.blocks = clone(DOC_BLOCKS);
+  state.pleas = [];
   state.boundLines = new Set();
   state.activeBlockId = null;
   state.docType = null;
@@ -82,6 +85,7 @@ function resetDemo(tabIndex) {
 
   renderSwitcher();
   renderBlocks();
+  renderPleas();
   renderContextChip();
 
   if (tab.demoNote) addMessage('demo', tab.demoNote);
@@ -108,8 +112,60 @@ function renderBlocks() {
       ${block.html}`;
     el.addEventListener('focusin', () => setActiveBlock(block.id));
     el.addEventListener('click', () => setActiveBlock(block.id));
+    // правки пользователя в редакторе сохраняются в стейт и переживают перерисовку
+    el.addEventListener('input', () => {
+      const copy = el.cloneNode(true);
+      copy.querySelector('.doc-block__label')?.remove();
+      copy.querySelector('.doc-block__status')?.remove();
+      block.html = copy.innerHTML;
+    });
     docBlocksEl.appendChild(el);
   });
+}
+
+/* ================= Просительная часть ================= */
+
+function pleaIntro() {
+  const k = state.docType ? state.docType.key : null;
+  if (k === 'appeal') return 'На основании изложенного, руководствуясь ст. 389.15, 389.20 УПК РФ, ПРОШУ:';
+  if (k === 'cassation') return 'На основании изложенного, руководствуясь ст. 401.14, 401.15 УПК РФ, ПРОШУ:';
+  if (k === 'motion') return 'На основании изложенного, руководствуясь ст. 119–122 УПК РФ, ПРОШУ:';
+  return 'На основании изложенного ПРОШУ:';
+}
+
+function renderPleas() {
+  if (!state.pleas.length) {
+    docPleasEl.innerHTML = '';
+    return;
+  }
+  docPleasEl.innerHTML = `
+    <div class="doc-pleas" contenteditable="true">
+      <div class="doc-pleas__intro">${pleaIntro()}</div>
+      <ol>${state.pleas.map(p => `<li>${p}</li>`).join('')}</ol>
+    </div>`;
+}
+
+/** Добавляет пункт в просительную часть (без дублей) и подсвечивает её. */
+function addPlea(text) {
+  if (!text || state.pleas.includes(text)) return;
+  state.pleas.push(text);
+  renderPleas();
+  const el = docPleasEl.querySelector('.doc-pleas');
+  if (el) {
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  }
+}
+
+/** Текст блока по линии: генерация + практика, если она есть в карточке дела. */
+function composeBlockText(line) {
+  let text = line.generatedText || REGEN_FALLBACK_TEXT;
+  const practice = state.card.practice;
+  if (practice && practice.length) {
+    const refs = practice.slice(0, 2).map(p => `${p.num} (${p.court})`).join(', ');
+    text += ` Аналогичная позиция подтверждается судебной практикой: ${refs}.`;
+  }
+  return text;
 }
 
 function setActiveBlock(id) {
@@ -169,13 +225,30 @@ function applyDocTitle(title) {
 
 /** Генерация шапки по типу документа и данным карточки (плейсхолдеры, где данных нет). */
 function generateHeaderLines(type) {
-  const adv = state.card.advocate || '&lt;вставить ФИО адвоката&gt;';
-  const cli = state.card.client || '&lt;вставить ФИО доверителя&gt;';
-  const lines = [];
-  if (type.court) lines.push(`В &lt;вставить название суда ${type.court}&gt;`);
-  lines.push(`от адвоката ${adv}`);
-  lines.push(`в интересах ${cli}`);
-  return lines;
+  const c = state.card;
+  const advName = c.advocateGen || c.advocate;
+  const cliName = c.clientGen || c.client;
+  const advLine = advName ? `от адвоката ${advName}` : 'от адвоката &lt;вставить ФИО адвоката&gt;';
+  const cliLine = cliName
+    ? `в интересах ${c.clientStatus ? c.clientStatus + ' ' : ''}${cliName}`
+    : 'в интересах &lt;вставить ФИО доверителя&gt;';
+
+  if (type.court) {
+    const court = c.court ? (type.key === 'appeal' ? c.court.appeal : c.court.cassation) : null;
+    if (court) {
+      // полные данные для шапки есть в карточке дела
+      const lines = [`В ${court.name}`, court.address, ''];
+      lines.push(advLine);
+      if (c.advocateDetails) lines.push(c.advocateDetails);
+      lines.push('');
+      lines.push(cliLine);
+      if (c.court.caseNum) lines.push(`по уголовному делу № ${c.court.caseNum}`);
+      if (c.court.firstInstanceRef) lines.push(`(${c.court.firstInstanceRef})`);
+      return lines;
+    }
+    return [`В &lt;вставить название суда ${type.court}&gt;`, advLine, cliLine];
+  }
+  return [advLine, cliLine];
 }
 
 function renderDocHeader(lines) {
@@ -580,8 +653,9 @@ async function finalizeDocType(type, title) {
 /** Сценарий 18: генерация текста ходатайства по введённым деталям. */
 async function onMotionDetails(text) {
   await think('Генерирую текст ходатайства', 2000);
-  insertBlock(`${text.charAt(0).toUpperCase()}${text.slice(1)}. На основании изложенного, руководствуясь нормами УПК РФ, защита просит суд удовлетворить настоящее ходатайство.`);
-  endScenario('Текст ходатайства добавлен в документ.');
+  insertBlock(`${text.charAt(0).toUpperCase()}${text.slice(1)}. Изложенные обстоятельства имеют существенное значение для дела и подтверждаются его материалами (статьи 119, 120 УПК РФ).`);
+  addPlea(PLEA_MOTION);
+  endScenario('Текст ходатайства добавлен в документ, просительная часть сформирована.');
   startHelp();
 }
 
@@ -750,7 +824,8 @@ async function onLineChosen(line, episode, { created } = {}) {
       onPick: async () => {
         addMessage('user', 'Перегенерировать блок');
         await think('Генерирую новый текст блока', 2000);
-        regenerateBlock(state.activeBlockId, line.generatedText || REGEN_FALLBACK_TEXT);
+        regenerateBlock(state.activeBlockId, composeBlockText(line));
+        addPlea(line.plea || PLEA_FALLBACK);
         endScenario('Текст блока обновлён, просительная часть пересобрана с учётом линии защиты.');
       }
     },
@@ -830,8 +905,9 @@ async function createLine6(episode, title, thesis) {
       onPick: async () => {
         addMessage('user', 'Добавить после активного блока');
         await think('Генерирую текст по линии защиты', 1800);
-        insertBlock(line.generatedText, { afterId: state.activeBlockId });
+        insertBlock(composeBlockText(line), { afterId: state.activeBlockId });
         state.boundLines.add(line.id);
+        addPlea(line.plea || PLEA_FALLBACK);
         endScenario('Текст по линии добавлен после активного блока, просительная часть обновлена.');
       }
     });
@@ -842,8 +918,9 @@ async function createLine6(episode, title, thesis) {
       onPick: async () => {
         addMessage('user', 'Добавить в конец документа');
         await think('Генерирую текст по линии защиты', 1800);
-        insertBlock(line.generatedText);
+        insertBlock(composeBlockText(line));
         state.boundLines.add(line.id);
+        addPlea(line.plea || PLEA_FALLBACK);
         endScenario('Текст по линии добавлен в конец документа, просительная часть обновлена.');
       }
     },
@@ -889,10 +966,11 @@ async function step15_1() {
         addMessage('user', 'Добавить все линии');
         await think('Генерирую текст документа по выбранным линиям защиты', 2200);
         unbound.forEach(line => {
-          insertBlock(line.generatedText || REGEN_FALLBACK_TEXT);
+          insertBlock(composeBlockText(line));
           state.boundLines.add(line.id);
+          addPlea(line.plea || PLEA_FALLBACK);
         });
-        addMessage('assistant', `Текст по ${unbound.length} лини${unbound.length === 1 ? 'и' : 'ям'} добавлен в документ.`);
+        addMessage('assistant', `Текст по ${unbound.length} лини${unbound.length === 1 ? 'и' : 'ям'} добавлен в документ, просительная часть обновлена.`);
         step15_rest();
       }
     },
@@ -923,7 +1001,17 @@ async function step15_rest() {
     : 'В карточке дела нет доказательств — привязка доказательств к линиям будет доступна из меню ии-звёздочки.');
 
   await think('Проверяю просительную часть', 1100);
-  addMessage('assistant', 'Просительная часть собрана и покрывает текущий состав блоков.');
+  if (state.pleas.length) {
+    addMessage('assistant', 'Просительная часть заполнена и покрывает текущий состав блоков.');
+  } else if (state.blocks.length) {
+    await think('Собираю просительную часть', 1200);
+    state.card.lines.filter(l => state.boundLines.has(l.id)).forEach(l => addPlea(l.plea || PLEA_FALLBACK));
+    addMessage('assistant', state.pleas.length
+      ? 'Просительная часть собрана.'
+      : 'Просительная часть будет собрана после привязки линий защиты к блокам.');
+  } else {
+    addMessage('assistant', 'Документ пуст — просительная часть будет собрана после добавления блоков.');
+  }
 
   await think('Проверяю полноту документа', 1300);
   addMessage('assistant', 'Документ можно дополнить: указание на смягчающие обстоятельства (ст. 61 УК РФ) и ходатайство об исследовании видеозаписи в судебном заседании.');
@@ -954,8 +1042,9 @@ async function runGenByLines() {
 
   await think('Генерирую текст по непривязанным линиям защиты', 2200);
   unbound.forEach(line => {
-    insertBlock(line.generatedText || REGEN_FALLBACK_TEXT);
+    insertBlock(composeBlockText(line));
     state.boundLines.add(line.id);
+    addPlea(line.plea || PLEA_FALLBACK);
   });
   endScenario(`Текст по ${unbound.length} ранее непривязанн${unbound.length === 1 ? 'ой линии' : 'ым линиям'} защиты вставлен в конец документа. Просительная часть обновлена.`);
 }
