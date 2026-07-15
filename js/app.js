@@ -276,6 +276,8 @@ function setBusy(busy) {
   state.busy = busy;
   promptEl.disabled = busy;
   sendBtn.disabled = busy;
+  const star = document.querySelector('#btn-star');
+  if (star) star.disabled = busy;
   feedEl.classList.toggle('is-busy', busy);
 }
 
@@ -1020,6 +1022,219 @@ async function runDocxScenario() {
 async function runDocxDuringStart() {
   await runDocxPipeline();
   offerDocTypeChoices('Теперь выберите тип документа — данные из приговора будут использованы при подготовке:');
+}
+
+/* ================= Меню ии-звёздочки (сценарии 16.x) ================= */
+
+const starBtn = $('#btn-star');
+const starMenu = $('#star-menu');
+const modalOverlay = $('#modal-overlay');
+const modalEl = $('#modal');
+
+function renderStarMenu() {
+  const block = getBlock(state.activeBlockId);
+  starMenu.innerHTML = `<div class="star-menu__header">${block ? 'Действия · ' + block.label : 'Действия по блоку'}</div>`;
+  STAR_ACTIONS.forEach(action => {
+    const btn = document.createElement('button');
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      starMenu.classList.remove('is-open');
+      onStarAction(action);
+    });
+    starMenu.appendChild(btn);
+  });
+}
+
+starBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  if (state.busy) return;
+  renderStarMenu();
+  starMenu.classList.toggle('is-open');
+});
+document.addEventListener('click', e => {
+  if (!starMenu.contains(e.target) && !starBtn.contains(e.target)) starMenu.classList.remove('is-open');
+});
+
+/** Вход 1 каркаса: пилз из выпадайки-звёздочки. */
+function onStarAction(action) {
+  if (state.busy) return;
+  const sc = state.scenario;
+
+  // Состояние A: стартовый сценарий — игнорируем, предлагаем чоисы снова
+  if (sc && sc.id === 'start-doc') {
+    addMessage('assistant', 'Сначала выберем тип документа — после этого действия из ИИ-меню станут доступны.');
+    if (sc.chipsSpec) offerChoices(sc.chipsSpec);
+    return;
+  }
+  // Состояние B: спросить, прервать ли сценарий
+  if (sc) {
+    askInterrupt(action.label, () => runStarAction(action));
+    return;
+  }
+  // Состояние C: выполнить согласно id
+  runStarAction(action);
+}
+
+function runStarAction(action) {
+  const block = getBlock(state.activeBlockId);
+  if (action.needsBlock && !block) {
+    addMessage('assistant', 'Блок не выбран. Кликните на нужный блок в документе и вызовите действие из ИИ-меню ещё раз.');
+    return;
+  }
+
+  switch (action.id) {
+    case 'bind-line':
+      addMessage('user', action.label);
+      startBindLine();
+      break;
+    case 'bind-evidence':
+      openEvidenceModal(block);
+      break;
+    case 'practice':
+      openPracticeModal();
+      break;
+    case 'shorter':
+      addMessage('user', `${block.label}: Перепеши короче`);
+      rewriteBlockAuto(block, 'shorter');
+      break;
+    case 'longer':
+      addMessage('user', `${block.label}: Перепеши подробнее`);
+      rewriteBlockAuto(block, 'longer');
+      break;
+    case 'rewrite':
+      startScenario('rewrite-block', 'Переписать блок');
+      awaitText('Как хотите изменить текст блока?', text => onRewriteBlock(block, text));
+      break;
+  }
+}
+
+const stripTags = html => {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return d.textContent.replace(/\s+/g, ' ').trim();
+};
+
+/** 16.5 / 16.7 — короче/подробнее без вопросов и подтверждений. */
+async function rewriteBlockAuto(block, mode) {
+  await think(mode === 'shorter' ? 'Переписываю блок короче' : 'Переписываю блок подробнее', 1800);
+  const text = stripTags(block.html);
+  if (mode === 'shorter') {
+    const sentences = text.split('. ');
+    block.html = sentences.slice(0, 2).join('. ') + (sentences.length > 2 ? '.' : '');
+  } else {
+    block.html = text + ' ' + DETAIL_SENTENCE.replace(/\s+/g, ' ').trim();
+  }
+  block.htmlBase = null;
+  renderBlocks();
+  flashBlock(block.id);
+  addMessage('assistant', mode === 'shorter' ? 'Блок переписан короче.' : 'Блок переписан подробнее.');
+}
+
+/** 16.6 — переписать блок по свободному запросу. */
+async function onRewriteBlock(block, request) {
+  await think('Переписываю блок согласно запросу', 1800);
+  block.html = REGEN_FALLBACK_TEXT;
+  block.htmlBase = null;
+  renderBlocks();
+  flashBlock(block.id);
+  endScenario('Блок переписан согласно вашему запросу.');
+}
+
+/* ---------- Модалки ---------- */
+
+function openModal({ title, bodyHtml, buttons }) {
+  modalEl.innerHTML = `
+    <div class="modal__title">${title}</div>
+    <div class="modal__body">${bodyHtml}</div>
+    <div class="modal__footer"></div>`;
+  const footer = modalEl.querySelector('.modal__footer');
+  buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'modal__btn' + (b.primary ? ' modal__btn--primary' : '');
+    btn.textContent = b.label;
+    btn.addEventListener('click', () => b.onClick ? b.onClick() : closeModal());
+    footer.appendChild(btn);
+  });
+  modalOverlay.hidden = false;
+}
+
+function closeModal() {
+  modalOverlay.hidden = true;
+  modalEl.innerHTML = '';
+}
+
+modalOverlay.addEventListener('click', e => {
+  if (e.target === modalOverlay) closeModal();
+});
+
+/** 16.1 — попап привязки доказательств к блоку. */
+function openEvidenceModal(block) {
+  const evidence = state.card.evidence;
+  if (!evidence.length) {
+    openModal({
+      title: 'Привязать доказательства',
+      bodyHtml: 'В карточке дела нет доказательств. Они появятся после разбора приговора (скрепка внизу чата).',
+      buttons: [{ label: 'Закрыть' }]
+    });
+    return;
+  }
+
+  block.evidence = block.evidence || [];
+  const items = evidence.map((ev, i) => `
+    <label class="evidence-item">
+      <input type="checkbox" data-idx="${i}" ${block.evidence.includes(i) ? 'checked' : ''}>
+      <span>${ev}</span>
+    </label>`).join('');
+
+  openModal({
+    title: `Привязать доказательства · ${block.label}`,
+    bodyHtml: items,
+    buttons: [
+      { label: 'Отмена' },
+      { label: 'Привязать', primary: true, onClick: () => applyEvidence(block) }
+    ]
+  });
+}
+
+async function applyEvidence(block) {
+  const selected = [...modalEl.querySelectorAll('input:checked')].map(i => +i.dataset.idx);
+  closeModal();
+
+  const prev = block.evidence || [];
+  const changed = selected.length !== prev.length || selected.some(i => !prev.includes(i));
+  if (!changed) {
+    addMessage('assistant', 'Состав доказательств не изменился — перегенерация не требуется.');
+    return;
+  }
+
+  block.evidence = selected;
+  addMessage('assistant', 'Провожу перегенерацию текста документа с учётом новых доказательств.');
+  await think('Перегенерирую текст блока', 2000);
+
+  if (!block.htmlBase) block.htmlBase = block.html;
+  const list = selected.map(i => state.card.evidence[i]);
+  block.html = block.htmlBase + (list.length
+    ? ` Изложенное подтверждается: ${list.map(e => e.charAt(0).toLowerCase() + e.slice(1)).join('; ')}.`
+    : '');
+  renderBlocks();
+  flashBlock(block.id);
+  addMessage('assistant', 'Текст блока перегенерирован.');
+}
+
+/** 16.3 — попап практики по линии защиты. */
+function openPracticeModal() {
+  const items = PRACTICE_CASES.map(c => `
+    <div class="practice-case">
+      <div class="practice-case__num">${c.num}</div>
+      <div class="practice-case__court">${c.court}</div>
+      <div>${c.summary}</div>
+      <span class="practice-case__result">${c.result}</span>
+    </div>`).join('');
+  openModal({
+    title: 'Практика по линии защиты',
+    bodyHtml: items,
+    buttons: [{ label: 'Закрыть' }]
+  });
 }
 
 /* ================= Ввод ================= */
