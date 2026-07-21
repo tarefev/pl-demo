@@ -190,13 +190,16 @@ button {
 .doc-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 28px 40px 80px;
+  /* без верхнего паддинга: sticky-шапки блоков прилипают к самому верху,
+     прокрутка не просвечивает над ними */
+  padding: 0 40px 80px;
 }
 
 .page {
   max-width: 860px;
   margin: 0 auto;
   position: relative;
+  padding-top: 28px;
 }
 
 .page__add-image {
@@ -560,6 +563,35 @@ body.text-only .doc-block__head { display: none !important; }
 .doc-ground__type--norm { background: var(--accent-soft); color: var(--accent); }
 .doc-ground__type--practice { background: #f3ecfd; color: #7c4dbe; }
 .doc-ground__type--evidence { background: #e6f6f8; color: #0e7787; }
+.doc-ground__type--circumstance { background: #fdf3e0; color: #9a6b00; }
+.doc-ground { cursor: default; }
+.doc-ground.is-dragging { opacity: .5; }
+.doc-ground.is-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+.doc-ground__type { cursor: grab; }
+
+/* аргумент без доказательства */
+.doc-arg--needs-ev { border-color: #f0ddb0; background: #fffdf6; }
+
+/* сплит-кнопка «+ Доказательство | не нужны» */
+.ev-split { display: inline-flex; }
+.ev-split.is-hot button[data-gt="evidence"] {
+  border-color: #f0b429;
+  color: #9a6b00;
+  background: #fdf3e0;
+  border-style: solid;
+}
+.ev-split__skip {
+  display: none;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  padding: 2px 8px;
+}
+.ev-split.is-hot:hover .ev-split__skip { display: inline-block; }
+.ev-split.is-hot:hover button[data-gt="evidence"] { border-radius: 6px 0 0 6px; }
+.ev-split__skip:hover { color: var(--danger); border-color: #f5d5d5; background: #fdf0f0; }
 .doc-ground__text { flex: 1; outline: none; line-height: 1.45; border-radius: 4px; }
 .doc-ground__text:focus { background: #e3e9fd; }
 .doc-ground__ev { color: var(--text-muted); }
@@ -1450,6 +1482,95 @@ body.text-only .doc-add-block { display: none !important; }
 .modal__btn--primary { background: var(--accent); color: #fff; }
 .modal__btn--primary:hover { background: #2f49d1; }
 .modal__btn--primary:disabled { background: #c9cede; cursor: default; }
+
+/* --- Двухпанельный попап в дизайне сайта --- */
+.modal--site { width: 860px; max-width: 96vw; }
+.sp-layout {
+  display: flex;
+  min-height: 340px;
+  max-height: 62vh;
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+}
+.sp-list {
+  width: 40%;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.sp-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sp-add {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.sp-add:hover { color: var(--accent); }
+.sp-list__items { overflow-y: auto; flex: 1; padding: 2px 6px 10px; }
+.sp-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sp-item:hover { background: #f4f5f9; }
+.sp-item.is-current { background: var(--accent-soft-2); box-shadow: inset 2px 0 0 var(--accent); }
+.sp-item__body { flex: 1; min-width: 0; }
+.sp-item__title { font-weight: 700; font-size: 12.5px; }
+.sp-item__sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-item input { margin-top: 2px; accent-color: var(--accent); width: 15px; height: 15px; }
+.sp-detail {
+  flex: 1;
+  padding: 12px 16px;
+  overflow-y: auto;
+}
+.sp-detail__title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 12px;
+  outline: none;
+  min-height: 1.2em;
+}
+.sp-detail__title:empty::before { content: "Введите название…"; color: var(--text-muted); font-style: italic; }
+.sp-detail__rows { display: flex; flex-direction: column; gap: 8px; }
+.sp-row {
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+  align-items: baseline;
+}
+.sp-row span {
+  flex: none;
+  width: 175px;
+  color: var(--text-muted);
+  border-bottom: 1px dotted var(--border);
+}
+.sp-row b { font-weight: 400; outline: none; flex: 1; }
+.sp-footer-hint {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .evidence-item {
   display: flex;

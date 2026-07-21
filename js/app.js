@@ -122,7 +122,7 @@ function blockIssues(block) {
   }
   const issues = [];
   if (!block.lineId) issues.push('нет линии защиты', 'нет аргументов');
-  if (!(block.evidence && block.evidence.length)) issues.push('нет доказательств');
+  if (blockLacksEvidence(block)) issues.push('не хватает доказательств у аргументов');
   if (block.argsStale) issues.push('аргументы не обновлены');
   return issues;
 }
@@ -141,14 +141,20 @@ function buildBlockMeta(block) {
   const isDefense = (block.section || 'defense') === 'defense' || isCtor;
   let barBtns;
 
-  if (isDefense) {
-    const evCount = (block.evidence || []).length;
+  if (isDefense && isCtor) {
     const argsCount = (block.argsList || []).length;
     // кнопки действий (сводка о блоке — в его шапке; смены линии нет: удалить блок и создать новый)
-    barBtns = [
-      ['evidence-modal', evCount ? 'Доказательства: ' + evCount : 'Нет привязанных доказательств', !evCount, ''],
-      ['args-modal', argsCount ? 'Аргументы: ' + argsCount : 'Нет аргументов', !argsCount, ''],
+    barBtns = [];
+    if (blockLacksEvidence(block)) barBtns.push(['scroll-evidence', 'Не хватает доказательств', true, '']);
+    barBtns.push(
+      ['args-modal', argsCount ? 'Аргументы и доводы: ' + argsCount : 'Нет аргументов и доводов', !argsCount, ''],
       ['practice-modal', 'Практика', false, ''],
+      ['rewrite', 'Редактировать с ИИ', false, '']
+    );
+  } else if (isDefense && block.kind === 'manual') {
+    // новый пустой блок: выбор линии активен (после выбора сменить нельзя — только удалить блок)
+    barBtns = [
+      ['pick-line', 'Выбрать линию защиты', true, ''],
       ['rewrite', 'Редактировать с ИИ', false, '']
     ];
   } else {
@@ -174,6 +180,8 @@ function buildBlockMeta(block) {
       switch (id) {
         case 'args-modal': openArgsModal(block); return;
         case 'practice-modal': openPracticeModal(block); return;
+        case 'scroll-evidence': scrollToNeedyArg(block); return;
+        case 'pick-line': openLinePicker(block); return;
         case 'evidence-modal':
           onStarAction({ id: 'bind-evidence', label: BLOCK_ACTION_LABELS['bind-evidence'], needsBlock: true });
           return;
@@ -250,7 +258,7 @@ function buildConstructor(block) {
       sub.addEventListener('click', e => {
         e.stopPropagation();
         setActiveBlock(block.id);
-        setActiveSubpart({ blockId: block.id, key: 'arguments', title: 'Аргументы' });
+        setActiveSubpart({ blockId: block.id, key: 'arguments', title: 'Аргументы и доводы' });
       });
       ctor.appendChild(sub);
       return;
@@ -284,19 +292,49 @@ function buildGroundsEl(block, arg) {
   (arg.grounds || []).forEach((ground, gi) => {
     const row = document.createElement('div');
     row.className = 'doc-ground';
+    row.draggable = true;
     row.innerHTML = `
-      <span class="doc-ground__type doc-ground__type--${ground.type}">${GROUND_LABELS[ground.type] || ground.type}</span>
+      <span class="doc-ground__type doc-ground__type--${ground.type}" title="Перетащить основание">${GROUND_LABELS[ground.type] || ground.type}</span>
       <span class="doc-ground__text" contenteditable="true">${ground.text}${ground.evidence ? ` <i class="doc-ground__ev">(${ground.evidence})</i>` : ''}</span>
       <button class="doc-arg__del" title="Удалить основание" type="button">×</button>`;
     const txt = row.querySelector('.doc-ground__text');
     txt.addEventListener('input', () => {
       ground.text = txt.innerText;
-      markDirty(block, 'Аргументы', 'arguments');
+      markDirty(block, 'Аргументы и доводы', 'arguments');
     });
     row.querySelector('.doc-arg__del').addEventListener('click', e => {
       e.stopPropagation();
       arg.grounds.splice(gi, 1);
       block.dirty = true;
+      renderBlocks();
+    });
+    // перетаскивание оснований между собой (внутри аргумента и между аргументами блока)
+    row.addEventListener('dragstart', e => {
+      e.stopPropagation();
+      e.dataTransfer.setData('text/ground', JSON.stringify({ blockId: block.id, argIdx: block.argsList.indexOf(arg), gIdx: gi }));
+      row.classList.add('is-dragging');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
+    row.addEventListener('dragover', e => {
+      if (![...e.dataTransfer.types].includes('text/ground')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', e => {
+      row.classList.remove('is-drop-target');
+      let data;
+      try { data = JSON.parse(e.dataTransfer.getData('text/ground')); } catch { return; }
+      if (!data || data.blockId !== block.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const fromArg = block.argsList[data.argIdx];
+      const moved = fromArg.grounds.splice(data.gIdx, 1)[0];
+      const toIdx = arg.grounds.indexOf(ground);
+      arg.grounds.splice(toIdx, 0, moved);
+      block.dirty = true;
+      syncArgsPart(block);
       renderBlocks();
     });
     g.appendChild(row);
@@ -311,9 +349,16 @@ function buildGroundsEl(block, arg) {
 
   const addRow = document.createElement('div');
   addRow.className = 'doc-ground__add';
-  addRow.innerHTML = ['fact', 'norm', 'practice', 'evidence'].map(t =>
-    `<button type="button" data-gt="${t}">+ ${GROUND_LABELS[t]}</button>`).join('');
-  addRow.querySelectorAll('button').forEach(btn => {
+  const needsEv = argNeedsEvidence(arg);
+  addRow.innerHTML = ['fact', 'norm', 'practice', 'circumstance'].map(t =>
+    `<button type="button" data-gt="${t}">+ ${GROUND_LABELS[t]}</button>`).join('') +
+    // «+ Доказательство»: при нехватке подсвечен; по наведению — вторая половинка «не нужны»
+    `<span class="ev-split${needsEv ? ' is-hot' : ''}">
+      <button type="button" data-gt="evidence">+ ${GROUND_LABELS.evidence}</button>
+      ${needsEv ? '<button type="button" class="ev-split__skip" title="Снять подсветку">не нужны</button>' : ''}
+    </span>`;
+
+  addRow.querySelectorAll('button[data-gt]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const type = btn.dataset.gt;
@@ -335,10 +380,137 @@ function buildGroundsEl(block, arg) {
       if (type === 'norm') pickNormGround(block, texts => texts.forEach(t => push({ type: 'norm', text: t })));
       if (type === 'practice') pickPracticeGround(block, texts => texts.forEach(t => push({ type: 'practice', text: t })));
       if (type === 'evidence') pickEvidenceGround(block, texts => texts.forEach(t => push({ type: 'evidence', text: t })));
+      if (type === 'circumstance') pickCircumstanceGround(block, texts => texts.forEach(t => push({ type: 'circumstance', text: t })));
     });
+  });
+  addRow.querySelector('.ev-split__skip')?.addEventListener('click', e => {
+    e.stopPropagation();
+    arg.noEvidenceNeeded = true;
+    renderBlocks();
+    addMessage('assistant', `Для одного из аргументов ${labelGen(block.label)} отмечено: доказательства не требуются.`);
   });
   g.appendChild(addRow);
   return g;
+}
+
+/** Скролл к ближайшему аргументу без доказательства (открывает конструктор при необходимости). */
+function scrollToNeedyArg(block) {
+  if (block.constructorDone) {
+    block.constructorDone = false;
+    renderBlocks();
+  }
+  const el = document.querySelector(`.doc-block[data-block-id="${block.id}"] .doc-arg--needs-ev`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  }
+}
+
+/* ---------- Двухпанельный попап в дизайне сайта (список + детали + добавление) ---------- */
+
+let spState = null;
+
+function openSitePicker({ title, context, items, addable, addTitle, applyLabel, hint, single, onApply }) {
+  spState = {
+    items: items.map(it => ({ ...it })),
+    current: 0,
+    single: !!single,
+    onApply
+  };
+
+  modalEl.innerHTML = `
+    <div class="modal__title">${title}</div>
+    ${context ? `<div class="modal__context">${context}</div>` : ''}
+    <div class="sp-layout">
+      <div class="sp-list">
+        <div class="sp-list__head"><span>${hint || ''}</span>${addable ? `<button class="sp-add" type="button">+ Добавить</button>` : ''}</div>
+        <div class="sp-list__items"></div>
+      </div>
+      <div class="sp-detail"></div>
+    </div>
+    <div class="modal__footer">
+      <span class="sp-footer-hint">${hint || 'Выберите элементы'}</span>
+      <button class="modal__btn">Отмена</button>
+      <button class="modal__btn modal__btn--primary">${applyLabel || 'Применить'}</button>
+    </div>`;
+  modalOverlay.hidden = false;
+  modalEl.classList.add('modal--site');
+
+  const listEl = modalEl.querySelector('.sp-list__items');
+  const detailEl = modalEl.querySelector('.sp-detail');
+
+  const renderDetail = () => {
+    const it = spState.items[spState.current];
+    if (!it) { detailEl.innerHTML = ''; return; }
+    detailEl.innerHTML = `
+      <div class="sp-detail__title" ${it.editable ? 'contenteditable="true"' : ''}>${it.title}</div>
+      <div class="sp-detail__rows">
+        ${(it.fields || []).map(([l, v], fi) => `
+          <div class="sp-row"><span>${l}</span><b ${it.editable && fi === 0 ? 'contenteditable="true" data-f="0"' : ''}>${v}</b></div>`).join('')}
+      </div>`;
+    if (it.editable) {
+      const t = detailEl.querySelector('.sp-detail__title');
+      t.addEventListener('input', () => {
+        it.title = t.innerText.trim();
+        listEl.children[spState.current].querySelector('.sp-item__title').textContent = it.title || 'Без названия';
+        if (it.fields && it.fields[0]) it.fields[0][1] = it.title;
+      });
+    }
+  };
+
+  const renderList = () => {
+    listEl.innerHTML = '';
+    spState.items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'sp-item' + (i === spState.current ? ' is-current' : '');
+      row.innerHTML = `
+        <div class="sp-item__body">
+          <div class="sp-item__title">${it.title || 'Без названия'}</div>
+          ${it.sub ? `<div class="sp-item__sub">${it.sub}</div>` : ''}
+        </div>
+        <input type="checkbox" ${it.checked ? 'checked' : ''}>`;
+      row.addEventListener('click', e => {
+        if (e.target.tagName === 'INPUT') return;
+        spState.current = i;
+        renderList();
+        renderDetail();
+      });
+      row.querySelector('input').addEventListener('change', e => {
+        if (spState.single && e.target.checked) {
+          spState.items.forEach((x, xi) => { x.checked = xi === i; });
+          renderList();
+        } else {
+          it.checked = e.target.checked;
+        }
+      });
+      listEl.appendChild(row);
+    });
+  };
+
+  modalEl.querySelector('.sp-add')?.addEventListener('click', () => {
+    spState.items.push({
+      id: null, title: '', sub: 'добавлено вручную', checked: true, editable: true,
+      fields: [['Описание', ''], ['Тип', '—'], ['Комментарий', '—']]
+    });
+    spState.current = spState.items.length - 1;
+    renderList();
+    renderDetail();
+    detailEl.querySelector('.sp-detail__title')?.focus();
+  });
+
+  const [cancelBtn, applyBtn] = modalEl.querySelectorAll('.modal__footer .modal__btn');
+  cancelBtn.addEventListener('click', () => { modalEl.classList.remove('modal--site'); closeModal(); });
+  applyBtn.addEventListener('click', () => {
+    const selected = spState.items.filter(it => it.checked && !it.editable);
+    const added = spState.items.filter(it => it.checked && it.editable && (it.title || '').trim());
+    modalEl.classList.remove('modal--site');
+    closeModal();
+    onApply(selected, added);
+  });
+
+  renderList();
+  renderDetail();
 }
 
 /** Попап выбора нормы из правовой базы; первыми — подсказки ИИ по линии блока. */
@@ -396,30 +568,79 @@ function pickPracticeGround(block, onApply) {
   });
 }
 
-/** Попап выбора доказательства для основания. */
+/** Попап выбора доказательства для основания — двухпанельный, в дизайне сайта. */
 function pickEvidenceGround(block, onApply) {
-  const evidence = state.card.evidence;
-  if (!evidence.length) {
-    openModal({ title: 'Доказательства', bodyHtml: 'В карточке дела нет доказательств — они появятся после разбора приговора.', buttons: [{ label: 'Закрыть' }] });
+  openSitePicker({
+    title: 'Доказательства',
+    context: blockModalContext(block),
+    hint: 'Выберите доказательства',
+    addable: true,
+    items: state.card.evidence.map((ev, i) => ({
+      id: i,
+      title: `Доказательство ${i + 1}`,
+      sub: ev.slice(0, 60),
+      checked: false,
+      fields: [['Описание', ev], ['Статья', '—'], ['Тип', '—'], ['Кто использовал', 'Сторона защиты'], ['Результат рассмотрения', '—']]
+    })),
+    onApply: (selected, added) => {
+      added.forEach(a => state.card.evidence.push(a.title));
+      const texts = [...selected.map(s => state.card.evidence[s.id]), ...added.map(a => a.title)];
+      if (texts.length) onApply(texts);
+    }
+  });
+}
+
+/** Попап выбора обстоятельства для основания — двухпанельный, в дизайне сайта. */
+function pickCircumstanceGround(block, onApply) {
+  openSitePicker({
+    title: 'Обстоятельства',
+    context: blockModalContext(block),
+    hint: 'Выберите обстоятельства',
+    addable: true,
+    items: state.card.circumstances.map((c, i) => ({
+      id: i,
+      title: `Обстоятельство ${i + 1}`,
+      sub: c.slice(0, 60),
+      checked: false,
+      fields: [['Описание', c], ['Тип', 'Смягчающее'], ['Категория', 'Иное обстоятельство, смягчающее наказание'], ['Результат рассмотрения', 'Принято во внимание']]
+    })),
+    onApply: (selected, added) => {
+      added.forEach(a => state.card.circumstances.push(a.title));
+      const texts = [...selected.map(s => state.card.circumstances[s.id]), ...added.map(a => a.title)];
+      if (texts.length) onApply(texts);
+    }
+  });
+}
+
+/** Выбор линии защиты для нового пустого блока (после выбора линию сменить нельзя). */
+function openLinePicker(block) {
+  const lines = state.card.lines;
+  if (!lines.length) {
+    openModal({ title: 'Линии защиты', bodyHtml: 'В карточке дела пока нет линий защиты. Создайте линию командой «создай линию».', buttons: [{ label: 'Закрыть' }] });
     return;
   }
-  openModal({
-    title: 'Доказательства — выбор',
-    context: blockModalContext(block),
-    bodyHtml: evidence.map((ev, i) => `
-      <label class="evidence-item"><input type="checkbox" data-idx="${i}"><span>${ev}</span></label>`).join(''),
-    buttons: [
-      { label: 'Отмена' },
-      {
-        label: 'Добавить',
-        primary: true,
-        onClick: () => {
-          const sel = [...modalEl.querySelectorAll('input[data-idx]:checked')].map(i => +i.dataset.idx);
-          closeModal();
-          if (sel.length) onApply(sel.map(i => evidence[i]));
-        }
-      }
-    ]
+  openSitePicker({
+    title: 'Линии защиты',
+    hint: 'Выберите линию защиты',
+    single: true,
+    applyLabel: 'Применить',
+    items: lines.map(l => ({
+      id: l.id,
+      title: shortLineTitle(l.title),
+      sub: (l.thesis || '').slice(0, 70),
+      checked: false,
+      fields: [
+        ['Линия защиты', shortLineTitle(l.title)],
+        ['Тезис', l.thesis || '—'],
+        ['Эпизод', l.episodeId ? (state.card.episodes.find(e => e.id === l.episodeId) || {}).title || '—' : '—'],
+        ['Нормативка', l.norms || '—']
+      ]
+    })),
+    onApply: selected => {
+      if (!selected.length) return;
+      const line = lines.find(l => l.id === selected[0].id);
+      if (line) applyLineToBlock(block, line);
+    }
   });
 }
 
@@ -446,7 +667,7 @@ function buildArgsEditor(block) {
 
   (block.argsList || []).forEach((arg, i) => {
     const item = document.createElement('div');
-    item.className = 'doc-arg';
+    item.className = 'doc-arg' + (argNeedsEvidence(arg) ? ' doc-arg--needs-ev' : '');
     const groundsFlat = ARGS_MODE === 'flat' && (arg.grounds || []).length
       ? `<div class="doc-arg__flatgrounds">Основания: ${arg.grounds.map(gr =>
           `<b>${GROUND_LABELS[gr.type]}</b> — ${gr.text}${gr.evidence ? ' (' + gr.evidence + ')' : ''}`).join(' · ')}</div>`
@@ -466,7 +687,7 @@ function buildArgsEditor(block) {
     text.addEventListener('input', () => {
       arg.text = text.innerText;
       syncArgsPart(block);
-      markDirty(block, 'Аргументы', 'arguments');
+      markDirty(block, 'Аргументы и доводы', 'arguments');
     });
     item.querySelector('.doc-arg__del').addEventListener('click', e => {
       e.stopPropagation();
@@ -528,7 +749,7 @@ function buildArgsEditor(block) {
     block.argsList = block.argsList || [];
     block.argsList.push({ text: val, source: null, auto: false, poolIdx: null, grounds: [] });
     syncArgsPart(block);
-    markDirty(block, 'Аргументы', 'arguments');
+    markDirty(block, 'Аргументы и доводы', 'arguments');
     // элемент становится настоящим аргументом, ниже появляется новый пустой
     renderBlocks();
     const items = document.querySelectorAll(`.doc-block[data-block-id="${block.id}"] .doc-arg:not(.doc-arg--empty) .doc-arg__text`);
@@ -1117,6 +1338,18 @@ function argOnlyPractice(arg) {
   return g.length > 0 && g.every(x => x.type === 'practice');
 }
 
+/** Аргументу не хватает доказательства (и пользователь не отметил «не нужны»). */
+function argNeedsEvidence(arg) {
+  if (arg.noEvidenceNeeded) return false;
+  if (!(arg.text || '').trim()) return false;
+  return !(arg.grounds || []).some(g => g.type === 'evidence' || (g.type === 'fact' && g.evidence));
+}
+
+/** Есть ли в блоке аргументы без доказательств. */
+function blockLacksEvidence(block) {
+  return !!(block.argsList && block.argsList.some(argNeedsEvidence));
+}
+
 /** Текстовое представление аргументов (в tree — вместе с их основаниями). */
 function argsListToHtml(argsList) {
   return (argsList || []).map(a => {
@@ -1136,7 +1369,7 @@ function syncArgsPart(block) {
   const html = argsListToHtml(block.argsList);
   const part = block.parts.find(p => p.key === 'arguments');
   if (part) part.html = html;
-  else block.parts.splice(1, 0, { key: 'arguments', title: 'Аргументы', html });
+  else block.parts.splice(1, 0, { key: 'arguments', title: 'Аргументы и доводы', html });
 }
 
 /** Подблоки конструктора по линии защиты; sel — аргументы/дела практики. */
@@ -1147,7 +1380,7 @@ function buildLineParts(line, sel = {}) {
   if (line.thesis) parts.push({ key: 'thesis', title: 'Тезис', html: line.thesis });
 
   const argsList = sel.argsList || defaultArgsList(line);
-  parts.push({ key: 'arguments', title: 'Аргументы', html: argsListToHtml(argsList) });
+  parts.push({ key: 'arguments', title: 'Аргументы и доводы', html: argsListToHtml(argsList) });
 
   if (ARGS_MODE === 'flat') {
     // плоский вариант: общие подблоки остаются на уровне блока
@@ -1164,8 +1397,8 @@ function buildLineParts(line, sel = {}) {
     }
   }
   // в tree-режиме нормативка/практика/обстоятельства живут в основаниях аргументов —
-  // на уровне блока не дублируются
-  parts.push({ key: 'other', title: 'Другие факты и доводы', html: '' });
+  // на уровне блока не дублируются; отдельный подблок «Другие факты и доводы» убран,
+  // свободные доводы добавляются как аргументы
   return parts;
 }
 
@@ -2921,7 +3154,7 @@ function confirmLineChange(block, newLine) {
 function openArgsModal(block) {
   const line = state.card.lines.find(l => l.id === block.lineId);
   if (!line) {
-    openModal({ title: 'Аргументы', bodyHtml: 'Сначала привяжите к блоку линию защиты.', buttons: [{ label: 'Закрыть' }] });
+    openModal({ title: 'Аргументы и доводы', bodyHtml: 'Сначала привяжите к блоку линию защиты.', buttons: [{ label: 'Закрыть' }] });
     return;
   }
   const pool = line.argumentsPool || [];
@@ -2943,7 +3176,7 @@ function openArgsModal(block) {
   }).join('');
 
   openModal({
-    title: `Аргументы линии · ${block.label}`,
+    title: `Аргументы и доводы · ${block.label}`,
     context: blockModalContext(block),
     bodyHtml: (groupsHtml || 'Для этой линии аргументы не подобраны.') + freeInputSectionHtml(),
     buttons: [

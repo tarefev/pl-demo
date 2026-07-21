@@ -12,7 +12,7 @@
 const ARGS_MODE = 'tree';
 
 /** Типы оснований аргумента. */
-const GROUND_LABELS = { fact: 'Факт', norm: 'Норма', practice: 'Практика', evidence: 'Доказательство' };
+const GROUND_LABELS = { fact: 'Факт', norm: 'Норма', practice: 'Практика', evidence: 'Доказательство', circumstance: 'Обстоятельство' };
 
 /* ================= Блоки документа (исходно документ пуст) ================= */
 
