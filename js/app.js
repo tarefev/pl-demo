@@ -921,22 +921,15 @@ async function onRegenerateClick(block) {
   // с подключённой нейронкой — складный юридический текст по данным конструктора,
   // включая содержание нормативных актов; без неё — шаблонная сборка
   if (typeof LLM !== 'undefined' && LLM.enabled()) {
-    setBusy(true);
-    const thinking = document.createElement('div');
-    thinking.className = 'msg msg--thinking';
-    thinking.innerHTML = `Генерирую текст ${labelGen(block.label)} нейросетью<span class="dots"></span>`;
-    feedEl.appendChild(thinking);
-    scrollFeed();
     try {
-      const text = await LLM.complete(fillPrompt(PROMPTS.regenerateBlock, blockPromptVars(block)), { maxTokens: 2000 });
+      const text = await thinkWhile(`Анализирую данные конструктора и генерирую текст ${labelGen(block.label)} нейросетью`, () =>
+        LLM.complete(fillPrompt(PROMPTS.regenerateBlock, blockPromptVars(block)), { maxTokens: 8000 }));
       block.generated = text.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
       addMessage('assistant', `Текст ${labelGen(block.label)} сгенерирован нейросетью по данным конструктора.`);
     } catch (err) {
       block.generated = generateFromParts(block.parts);
       addMessage('assistant', `(ИИ недоступен: ${err.message} — текст собран по шаблону.)`);
     }
-    thinking.remove();
-    setBusy(false);
   } else {
     await think(`Перегенерирую текст ${labelGen(block.label)}`, 1800);
     block.generated = generateFromParts(block.parts);
@@ -1492,12 +1485,13 @@ async function generateSectionText(kind, fallbackHtml) {
   if (typeof LLM === 'undefined' || !LLM.enabled()) return fallbackHtml;
   const names = { verdict: 'Описание судебного акта первой инстанции', facts: 'Описание обстоятельств дела', admission: 'Позиция по приговору' };
   try {
-    const text = await LLM.complete(fillPrompt(PROMPTS.generateSection, {
-      sectionName: names[kind] || kind,
-      docType: state.docType ? state.docType.label : 'документ',
-      caseSummary: caseSummaryForPrompt(),
-      sectionData: `Черновик раздела (можно опираться): ${stripTags(fallbackHtml).replace(/\s+/g, ' ')}`
-    }));
+    const text = await thinkWhile(`Анализирую материалы дела и формирую раздел «${names[kind] || kind}» нейросетью`, () =>
+      LLM.complete(fillPrompt(PROMPTS.generateSection, {
+        sectionName: names[kind] || kind,
+        docType: state.docType ? state.docType.label : 'документ',
+        caseSummary: caseSummaryForPrompt(),
+        sectionData: `Черновик раздела (можно опираться): ${stripTags(fallbackHtml).replace(/\s+/g, ' ')}`
+      })));
     return text.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
   } catch (err) {
     addMessage('assistant', `(ИИ недоступен: ${err.message} — использован шаблон.)`);
@@ -1868,6 +1862,22 @@ function addFileMessage(fileName) {
   scrollFeed();
 }
 
+/** «Думает», пока выполняется реальная асинхронная работа (LLM-вызов). */
+async function thinkWhile(text, fn) {
+  setBusy(true);
+  const el = document.createElement('div');
+  el.className = 'msg msg--thinking';
+  el.innerHTML = `${text}<span class="dots"></span>`;
+  feedEl.appendChild(el);
+  scrollFeed();
+  try {
+    return await fn();
+  } finally {
+    el.remove();
+    setBusy(false);
+  }
+}
+
 /** «Генерация» (состояние D): блокирует ввод и чипы. */
 async function think(text, ms = 1400) {
   setBusy(true);
@@ -2136,13 +2146,14 @@ async function editSubpartWithAI(text) {
   } else if (typeof LLM !== 'undefined' && LLM.enabled()) {
     // нейронка переписывает выбранный подблок согласно команде пользователя
     try {
-      const out = await LLM.complete(fillPrompt(PROMPTS.editTarget, {
-        docType: state.docType ? state.docType.label : 'документ',
-        targetName: `${block.label} · ${part.title}`,
-        userCommand: text,
-        caseSummary: caseSummaryForPrompt(),
-        currentText: stripTags(part.html).replace(/\s+/g, ' ')
-      }));
+      const out = await thinkWhile(`Анализирую запрос и переписываю подблок «${part.title}» нейросетью`, () =>
+        LLM.complete(fillPrompt(PROMPTS.editTarget, {
+          docType: state.docType ? state.docType.label : 'документ',
+          targetName: `${block.label} · ${part.title}`,
+          userCommand: text,
+          caseSummary: caseSummaryForPrompt(),
+          currentText: stripTags(part.html).replace(/\s+/g, ' ')
+        })));
       part.html = out.replace(/\n{2,}/g, ' ').trim();
     } catch (err) {
       addMessage('assistant', `(ИИ недоступен: ${err.message} — применена шаблонная правка.)`);

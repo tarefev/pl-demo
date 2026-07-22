@@ -31,8 +31,9 @@ const LLM = {
   enabled() { return !!this.key; },
 
   /** Один запрос: system + user, возвращает текст ответа. */
-  async complete(userPrompt, { temperature = 0.3, maxTokens = 1600 } = {}) {
-    // gpt-5-* и o-* принимают max_completion_tokens и не принимают temperature ≠ 1
+  async complete(userPrompt, { temperature = 0.3, maxTokens = 4000 } = {}) {
+    // gpt-5-* и o-*: max_completion_tokens (включая reasoning-токены!), temperature не передаём,
+    // reasoning_effort=low, чтобы бюджет уходил в текст, а не в размышления
     const reasoning = /^(gpt-5|o\d)/.test(this.model);
     const body = {
       model: this.model,
@@ -43,10 +44,13 @@ const LLM = {
     };
     if (reasoning) {
       body.max_completion_tokens = maxTokens;
+      body.reasoning_effort = 'low';
     } else {
       body.temperature = temperature;
       body.max_tokens = maxTokens;
     }
+
+    console.log('[LLM] →', this.model, this.url, `prompt ${userPrompt.length} chars, limit ${maxTokens}`);
     const r = await fetch(this.url, {
       method: 'POST',
       headers: {
@@ -55,10 +59,28 @@ const LLM = {
       },
       body: JSON.stringify(body)
     });
-    if (!r.ok) throw new Error('LLM HTTP ' + r.status);
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      console.error('[LLM] HTTP', r.status, errText);
+      let apiMsg = '';
+      try { apiMsg = JSON.parse(errText).error.message.slice(0, 120); } catch {}
+      throw new Error(`HTTP ${r.status}${apiMsg ? ': ' + apiMsg : ''}`);
+    }
     const j = await r.json();
-    const text = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-    if (!text) throw new Error('LLM: пустой ответ');
+    const choice = j.choices && j.choices[0];
+    const text = choice && choice.message && choice.message.content;
+    console.log('[LLM] ←', {
+      finish_reason: choice && choice.finish_reason,
+      usage: j.usage,
+      contentLength: (text || '').length
+    });
+    if (!text) {
+      console.error('[LLM] пустой ответ, полный JSON:', j);
+      const reason = choice && choice.finish_reason === 'length'
+        ? 'бюджет токенов ушёл в reasoning (finish_reason=length) — увеличьте лимит'
+        : 'пустой content';
+      throw new Error(reason);
+    }
     return text.trim();
   }
 };
