@@ -227,6 +227,8 @@ button {
   margin: 0 auto;
   position: relative;
   padding-top: 28px;
+  /* текст документа крупнее интерфейсного на 2 единицы */
+  font-size: 16px;
 }
 
 .page__add-image {
@@ -265,6 +267,11 @@ button {
   min-width: 340px;
   line-height: 1.65;
   outline: none;
+  border-left: 2px solid transparent;
+}
+.doc-header.is-active .doc-header__body {
+  background: var(--accent-soft-2);
+  border-left-color: var(--accent);
 }
 .doc-header__body p { min-height: 1em; }
 .doc-header__body .placeholder { color: var(--text-muted); }

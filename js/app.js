@@ -1675,12 +1675,17 @@ function composeVerdictText() {
   return parts.map(p => `<p>${p}</p>`).join('');
 }
 
+/** Спец-идентификатор шапки документа в контексте чата. */
+const HEADER_ID = '__header__';
+
 function setActiveBlock(id) {
   if (state.activeBlockId === id) return;
   state.activeBlockId = id;
   state.activeSubpart = null;
   document.querySelectorAll('.doc-block').forEach(el =>
     el.classList.toggle('is-active', el.dataset.blockId === id));
+  // шапка документа тоже может быть активным контекстом (пилз «Шапка»)
+  document.querySelector('.doc-header')?.classList.toggle('is-active', id === HEADER_ID);
   renderContextChip();
 }
 
@@ -1787,13 +1792,45 @@ function renderDocHeader(lines) {
 // правка шапки руками тоже обновляет чеклист (убрал <вставить...> — шапка готова)
 docHeaderBodyEl.addEventListener('input', () => updateChecklist());
 
+// клик/фокус в шапке кладёт её в контекст чата пилзом «Шапка»
+['click', 'focusin'].forEach(ev => docHeaderBodyEl.addEventListener(ev, () => {
+  setActiveBlock(HEADER_ID);
+}));
+
+/** Правка шапки по команде из чата (через нейронку; без неё — подсказка). */
+async function editHeaderWithAI(text) {
+  if (typeof LLM === 'undefined' || !LLM.enabled()) {
+    addMessage('assistant', '(Демо) Правка шапки по команде доступна с подключённой нейронкой (кнопка «ИИ» вверху) — либо отредактируйте шапку прямо в документе.');
+    return;
+  }
+  try {
+    const out = await thinkWhile('Анализирую запрос и переписываю шапку документа нейросетью', () =>
+      LLM.complete(fillPrompt(PROMPTS.editTarget, {
+        docType: state.docType ? state.docType.label : 'документ',
+        targetName: 'Шапка документа',
+        userCommand: text,
+        caseSummary: caseSummaryForPrompt(),
+        currentText: docHeaderBodyEl.innerText.replace(/\s+/g, ' ').trim()
+      })));
+    docHeaderBodyEl.innerHTML = out.split(/\n+/).map(l => `<p>${l.trim()}</p>`).join('');
+    const wrap = docHeaderBodyEl.closest('.doc-header');
+    wrap.classList.add('flash');
+    setTimeout(() => wrap.classList.remove('flash'), 1600);
+    updateChecklist();
+    addMessage('assistant', 'Шапка документа обновлена согласно вашему запросу.');
+  } catch (err) {
+    addMessage('assistant', `(ИИ недоступен: ${err.message} — шапка не изменена.)`);
+  }
+}
+
 /* ================= Чип контекста во вводе ================= */
 
 function renderContextChip() {
   updateScenarioBanner();
   contextEl.innerHTML = '';
   if (!state.activeBlockId) return;
-  const block = getBlock(state.activeBlockId);
+  const isHeader = state.activeBlockId === HEADER_ID;
+  const block = isHeader ? { label: 'Шапка' } : getBlock(state.activeBlockId);
   if (!block) return;
 
   const chip = document.createElement('span');
@@ -1809,6 +1846,7 @@ function renderContextChip() {
     state.activeBlockId = null;
     state.activeSubpart = null;
     document.querySelectorAll('.doc-block').forEach(el => el.classList.remove('is-active'));
+    document.querySelector('.doc-header')?.classList.remove('is-active');
     renderContextChip();
   });
   contextEl.appendChild(chip);
@@ -2109,6 +2147,7 @@ async function routeText(text) {
   if (!sc) {
     if (trigger) return launchScenario(trigger);
     if (state.activeSubpart) return editSubpartWithAI(text);
+    if (state.activeBlockId === HEADER_ID) return editHeaderWithAI(text);
     return onFreeInput(text);
   }
 
