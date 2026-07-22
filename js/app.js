@@ -637,26 +637,64 @@ function pickCircumstanceGround(block, onApply) {
 /** Выбор линии защиты для нового пустого блока; можно добавить новую линию прямо из попапа. */
 function openLinePicker(block) {
   const lines = state.card.lines;
+
+  // библиотека линий из дерева УПК: выбор из существующих + нормативка по линии
+  const libItems = (typeof DEFENSE_LINES_LIBRARY !== 'undefined' ? DEFENSE_LINES_LIBRARY : []).map((l, i) => ({
+    id: `lib-${i}`,
+    lib: l,
+    title: `${l.code} ${l.title}`,
+    sub: l.norms.slice(0, 3).map(n => n.art).join(', ') || 'библиотека линий',
+    checked: false,
+    fields: [
+      ['Линия защиты', `${l.code} ${l.title}`],
+      ['Раздел дерева', l.code],
+      ['Нормативка', l.norms.slice(0, 5).map(n => n.art).join('; ') || '—'],
+      ...l.norms.slice(0, 4).map(n => [n.art, (n.note || '—').slice(0, 160)])
+    ]
+  }));
+
   openSitePicker({
     title: 'Линии защиты',
-    hint: 'Выберите линию защиты',
+    hint: 'Карточка дела и библиотека (дерево УПК)',
     single: true,
     addable: true,
     addFields: { fields: [['Линия защиты', ''], ['Тезис', ''], ['Эпизод', '—'], ['Нормативка', '—']] },
     applyLabel: 'Применить',
-    items: lines.map(l => ({
-      id: l.id,
-      title: shortLineTitle(l.title),
-      sub: (l.thesis || '').slice(0, 70),
-      checked: false,
-      fields: [
-        ['Линия защиты', shortLineTitle(l.title)],
-        ['Тезис', l.thesis || '—'],
-        ['Эпизод', l.episodeId ? (state.card.episodes.find(e => e.id === l.episodeId) || {}).title || '—' : '—'],
-        ['Нормативка', l.norms || '—']
-      ]
-    })),
+    items: [
+      ...lines.map(l => ({
+        id: l.id,
+        title: shortLineTitle(l.title),
+        sub: 'карточка дела' + (l.thesis ? ' · ' + l.thesis.slice(0, 50) : ''),
+        checked: false,
+        fields: [
+          ['Линия защиты', shortLineTitle(l.title)],
+          ['Тезис', l.thesis || '—'],
+          ['Эпизод', l.episodeId ? (state.card.episodes.find(e => e.id === l.episodeId) || {}).title || '—' : '—'],
+          ['Нормативка', l.norms || '—']
+        ]
+      })),
+      ...libItems
+    ],
     onApply: (selected, added) => {
+      // линия из библиотеки: создаём в карточке с нормативкой из дерева
+      const libPick = selected.find(s => s.lib);
+      if (libPick) {
+        const l = libPick.lib;
+        const line = {
+          id: `line-lib-${state.card.lines.length + 1}`,
+          episodeId: null,
+          title: `${l.code} ${l.title}`,
+          thesis: '',
+          norms: l.norms.map(n => n.art).filter((v, i, a) => a.indexOf(v) === i).slice(0, 6).join('; '),
+          normsDetailed: l.norms,
+          argumentsPool: null,
+          plea: null
+        };
+        state.card.lines.push(line);
+        addMessage('assistant', `Линия «${line.title}» взята из библиотеки — нормативка по дереву УПК подтянута в карточку.`);
+        applyLineToBlock(block, line);
+        return;
+      }
       // новая линия, добавленная из попапа
       if (added.length) {
         const a = added[0];
@@ -1217,7 +1255,7 @@ async function runPlaceholderAction(act) {
   switch (act) {
     case 'verdict-card':
       await think('Формирую описание приговора', 1500);
-      insertBlock(await generateSectionText('verdict', composeVerdictText()), { atStart: true, section: 'verdict', kind: 'verdict' });
+      await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict' });
       addMessage('assistant', 'Описание приговора заполнено из карточки дела.');
       break;
 
@@ -1229,7 +1267,7 @@ async function runPlaceholderAction(act) {
     case 'facts-card':
       state.factsSource = 'card';
       await think('Формирую описание обстоятельств из карточки дела', 1600);
-      insertBlock(await generateSectionText('facts', composeFactsText()), { atStart: true, section: 'facts', kind: 'facts' });
+      await insertSectionBlock('facts', composeFactsText(), { atStart: true, section: 'facts', kind: 'facts' });
       addMessage('assistant', 'Обстоятельства дела заполнены из карточки дела.');
       await maybeAutoAdmission();
       break;
@@ -1286,7 +1324,7 @@ async function maybeAutoAdmission({ silent } = {}) {
   if (!eps.length || !eps.every(ep => ep.admission)) return false;
 
   await think('Формирую позицию по приговору', 1200);
-  insertBlock(await generateSectionText('admission', composeAdmissionText()), { section: 'admission', kind: 'admission' });
+  await insertSectionBlock('admission', composeAdmissionText(), { section: 'admission', kind: 'admission' });
   if (!silent) addMessage('assistant', 'Позиция по приговору заполнена автоматически по данным карточки дела.');
   return true;
 }
@@ -1499,6 +1537,11 @@ async function generateSectionText(kind, fallbackHtml) {
   }
 }
 
+/** Информативный плейсхолдер на время генерации нейросетью. */
+function pendingHtml(what) {
+  return `<span class="gen-pending">Генерируется нейросетью: ${what}<span class="dots"></span></span>`;
+}
+
 /** Догенерация текста защитного блока нейронкой сразу после вставки. */
 async function llmGenerateBlock(blockId) {
   if (typeof LLM === 'undefined' || !LLM.enabled()) return;
@@ -1510,8 +1553,31 @@ async function llmGenerateBlock(blockId) {
     block.generated = text.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
     renderBlocks();
   } catch (err) {
+    // не оставляем висящий плейсхолдер — откатываемся на шаблон
+    block.generated = generateFromParts(block.parts);
+    renderBlocks();
     addMessage('assistant', `(ИИ недоступен для ${labelGen(block.label)}: ${err.message} — оставлен шаблонный текст.)`);
   }
+}
+
+/**
+ * Вставка секции (судебный акт / обстоятельства / позиция): с нейронкой блок
+ * появляется сразу с информативным плейсхолдером, текст подтягивается по готовности.
+ */
+async function insertSectionBlock(kind, fallbackHtml, opts) {
+  const names = { verdict: 'описание судебного акта первой инстанции', facts: 'описание обстоятельств дела по фабуле', admission: 'позиция по приговору' };
+  if (typeof LLM === 'undefined' || !LLM.enabled()) {
+    return insertBlock(fallbackHtml, opts);
+  }
+  const id = insertBlock(pendingHtml(names[kind] || kind), opts);
+  const text = await generateSectionText(kind, fallbackHtml);
+  const block = getBlock(id);
+  if (block) {
+    block.html = text;
+    renderBlocks();
+    flashBlock(id);
+  }
+  return id;
 }
 
 /** Текстовое представление аргументов (в tree — вместе с их основаниями). */
@@ -1590,7 +1656,11 @@ function insertLineBlock(line, opts = {}) {
   const selectedPractice = state.card.practice && state.card.practice.length
     ? [0, 1].filter(i => state.card.practice[i]) : null;
   const parts = buildLineParts(line, { argsList, selectedPractice });
-  const id = insertBlock('', { ...opts, lineId: line.id, parts, generated: generateFromParts(parts) });
+  // с нейронкой — информативный плейсхолдер вместо заглушечного текста до генерации
+  const initialText = (typeof LLM !== 'undefined' && LLM.enabled())
+    ? pendingHtml(`текст по линии «${shortLineTitle(line.title)}» — аргументы, основания, нормативная опора`)
+    : generateFromParts(parts);
+  const id = insertBlock('', { ...opts, lineId: line.id, parts, generated: initialText });
   const b = getBlock(id);
   b.argsList = argsList;
   b.selectedPractice = selectedPractice;
@@ -2825,7 +2895,7 @@ async function runGenByLines() {
   if (state.card.episodes.length && !factsFilled()) {
     setStep('17.3');
     await think('Генерирую сутевую часть дела по фабуле', 1800);
-    insertBlock(await generateSectionText('facts', composeFactsText()), { atStart: true, section: 'facts', kind: 'facts' });
+    await insertSectionBlock('facts', composeFactsText(), { atStart: true, section: 'facts', kind: 'facts' });
     if (!state.factsSource) state.factsSource = 'card';
     factsAdded = true;
   }
@@ -2834,7 +2904,7 @@ async function runGenByLines() {
   if (state.structure && state.structure.some(p => p.kind === 'verdict') && state.card.verdict
       && !state.blocks.some(b => (b.section || 'defense') === 'verdict')) {
     await think('Формирую описание приговора', 1400);
-    insertBlock(await generateSectionText('verdict', composeVerdictText()), { atStart: true, section: 'verdict', kind: 'verdict' });
+    await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict' });
   }
 
   // признание известно по карточке — заполняем автоматически (без отдельной отбивки)
