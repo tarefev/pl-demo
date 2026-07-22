@@ -1499,6 +1499,21 @@ async function generateSectionText(kind, fallbackHtml) {
   }
 }
 
+/** Догенерация текста защитного блока нейронкой сразу после вставки. */
+async function llmGenerateBlock(blockId) {
+  if (typeof LLM === 'undefined' || !LLM.enabled()) return;
+  const block = getBlock(blockId);
+  if (!block || !block.parts) return;
+  try {
+    const text = await thinkWhile(`Анализирую данные конструктора и генерирую текст ${labelGen(block.label)} нейросетью`, () =>
+      LLM.complete(fillPrompt(PROMPTS.regenerateBlock, blockPromptVars(block)), { maxTokens: 8000 }));
+    block.generated = text.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
+    renderBlocks();
+  } catch (err) {
+    addMessage('assistant', `(ИИ недоступен для ${labelGen(block.label)}: ${err.message} — оставлен шаблонный текст.)`);
+  }
+}
+
 /** Текстовое представление аргументов (в tree — вместе с их основаниями). */
 function argsListToHtml(argsList) {
   return (argsList || []).map(a => {
@@ -1601,6 +1616,8 @@ function applyLineToBlock(block, line, { silent } = {}) {
   renderBlocks();
   flashBlock(block.id);
   if (!silent) addMessage('assistant', `К ${labelGen(block.label).replace('Блока', 'Блоку')} привязана линия «${shortLineTitle(line.title)}» — конструктор и текст заполнены заново.`);
+  // текст блока сразу генерится нейронкой (если подключена)
+  llmGenerateBlock(block.id);
 }
 
 /** «Вся информация блока будет удалена» — блок становится пустым. */
@@ -2603,9 +2620,10 @@ async function createLine6(episode, title, thesis) {
       onPick: async () => {
         addMessage('user', 'Добавить после активного блока');
         await think('Генерирую текст по линии защиты', 1800);
-        insertLineBlock(line, { afterId: state.activeBlockId });
+        const afterActiveId = insertLineBlock(line, { afterId: state.activeBlockId });
         state.boundLines.add(line.id);
         addPlea(line.plea || PLEA_FALLBACK);
+        await llmGenerateBlock(afterActiveId);
         endScenario('Текст по линии добавлен после активного блока, просительная часть обновлена.');
         maybeExplainWarnings();
       }
@@ -2617,9 +2635,10 @@ async function createLine6(episode, title, thesis) {
       onPick: async () => {
         addMessage('user', 'Добавить в конец документа');
         await think('Генерирую текст по линии защиты', 1800);
-        insertLineBlock(line);
+        const atEndId = insertLineBlock(line);
         state.boundLines.add(line.id);
         addPlea(line.plea || PLEA_FALLBACK);
+        await llmGenerateBlock(atEndId);
         endScenario('Текст по линии добавлен в конец документа, просительная часть обновлена.');
         maybeExplainWarnings();
       }
@@ -2667,11 +2686,13 @@ async function step15_1() {
         addMessage('user', 'Добавить все линии');
         setStep('15.1.2');
         await think('Генерирую текст документа по выбранным линиям защиты', 2200);
+        const addedIds = [];
         unbound.forEach(line => {
-          insertLineBlock(line);
+          addedIds.push(insertLineBlock(line));
           state.boundLines.add(line.id);
           addPlea(line.plea || PLEA_FALLBACK);
         });
+        for (const id of addedIds) await llmGenerateBlock(id);
         addMessage('assistant', `Текст по ${unbound.length} лини${unbound.length === 1 ? 'и' : 'ям'} добавлен в документ, просительная часть обновлена.`);
         maybeExplainWarnings();
         step15_rest();
@@ -2751,11 +2772,14 @@ async function runGenByLines() {
 
   setStep('17.2');
   await think('Генерирую текст по непривязанным линиям защиты', 2200);
+  const insertedIds = [];
   unbound.forEach(line => {
-    insertLineBlock(line);
+    insertedIds.push(insertLineBlock(line));
     state.boundLines.add(line.id);
     addPlea(line.plea || PLEA_FALLBACK);
   });
+  // с нейронкой текст каждого защитного блока генерится сразу, не заглушкой
+  for (const id of insertedIds) await llmGenerateBlock(id);
 
   // 17.3 Сутевая часть дела (фабула) — первым блоком после заголовка
   let factsAdded = false;
