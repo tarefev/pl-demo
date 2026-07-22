@@ -413,7 +413,7 @@ function scrollToNeedyArg(block) {
 
 let spState = null;
 
-function openSitePicker({ title, context, items, addable, addFields, applyLabel, hint, single, onApply }) {
+function openSitePicker({ title, context, items, addable, addFields, applyLabel, hint, single, onApply, onAdd }) {
   spState = {
     items: items.map(it => ({ ...it })),
     current: 0,
@@ -502,6 +502,8 @@ function openSitePicker({ title, context, items, addable, addFields, applyLabel,
   };
 
   modalEl.querySelector('.sp-add')?.addEventListener('click', () => {
+    // onAdd переопределяет «+ Добавить»: например, открывает следующий попап выбора
+    if (onAdd) { modalEl.classList.remove('modal--site'); closeModal(); onAdd(); return; }
     const base = items.find(x => x.provesField);
     spState.items.push({
       id: null, title: '', sub: 'добавлено вручную', checked: true, editable: true,
@@ -634,11 +636,42 @@ function pickCircumstanceGround(block, onApply) {
   });
 }
 
-/** Выбор линии защиты для нового пустого блока; можно добавить новую линию прямо из попапа. */
+/**
+ * Выбор линии защиты для нового пустого блока: первый шаг — линии карточки дела,
+ * «+ Добавить» открывает библиотеку всех линий (дерево УПК) для создания новой.
+ */
 function openLinePicker(block) {
   const lines = state.card.lines;
 
-  // библиотека линий из дерева УПК: выбор из существующих + нормативка по линии
+  openSitePicker({
+    title: 'Линии защиты',
+    hint: 'Карточка дела · «+ Добавить» — новая линия из библиотеки',
+    single: true,
+    addable: true,
+    onAdd: () => openLineLibraryPicker(block),
+    applyLabel: 'Применить',
+    items: lines.map(l => ({
+      id: l.id,
+      title: shortLineTitle(l.title),
+      sub: 'карточка дела' + (l.thesis ? ' · ' + l.thesis.slice(0, 50) : ''),
+      checked: false,
+      fields: [
+        ['Линия защиты', shortLineTitle(l.title)],
+        ['Тезис', l.thesis || '—'],
+        ['Эпизод', l.episodeId ? (state.card.episodes.find(e => e.id === l.episodeId) || {}).title || '—' : '—'],
+        ['Нормативка', l.norms || '—']
+      ]
+    })),
+    onApply: (selected) => {
+      if (!selected.length) return;
+      const line = lines.find(l => l.id === selected[0].id);
+      if (line) applyLineToBlock(block, line);
+    }
+  });
+}
+
+/** Второй шаг «+ Добавить»: все линии библиотеки (дерево УПК) + свободный ввод своей. */
+function openLineLibraryPicker(block) {
   const libItems = (typeof DEFENSE_LINES_LIBRARY !== 'undefined' ? DEFENSE_LINES_LIBRARY : []).map((l, i) => ({
     id: `lib-${i}`,
     lib: l,
@@ -654,27 +687,13 @@ function openLinePicker(block) {
   }));
 
   openSitePicker({
-    title: 'Линии защиты',
-    hint: 'Карточка дела и библиотека (дерево УПК)',
+    title: 'Новая линия защиты — библиотека',
+    hint: 'Все линии дерева УПК · «+ Добавить» — своя линия',
     single: true,
     addable: true,
     addFields: { fields: [['Линия защиты', ''], ['Тезис', ''], ['Эпизод', '—'], ['Нормативка', '—']] },
     applyLabel: 'Применить',
-    items: [
-      ...lines.map(l => ({
-        id: l.id,
-        title: shortLineTitle(l.title),
-        sub: 'карточка дела' + (l.thesis ? ' · ' + l.thesis.slice(0, 50) : ''),
-        checked: false,
-        fields: [
-          ['Линия защиты', shortLineTitle(l.title)],
-          ['Тезис', l.thesis || '—'],
-          ['Эпизод', l.episodeId ? (state.card.episodes.find(e => e.id === l.episodeId) || {}).title || '—' : '—'],
-          ['Нормативка', l.norms || '—']
-        ]
-      })),
-      ...libItems
-    ],
+    items: libItems,
     onApply: (selected, added) => {
       // линия из библиотеки: создаём в карточке с нормативкой из дерева
       const libPick = selected.find(s => s.lib);
@@ -695,7 +714,7 @@ function openLinePicker(block) {
         applyLineToBlock(block, line);
         return;
       }
-      // новая линия, добавленная из попапа
+      // своя линия, введённая вручную
       if (added.length) {
         const a = added[0];
         const thesisField = (a.fields || []).find(f => f[0] === 'Тезис');
@@ -711,11 +730,7 @@ function openLinePicker(block) {
         state.card.lines.push(line);
         addMessage('assistant', `Создана новая линия защиты: «${a.title}» — сохранена в карточку дела.`);
         applyLineToBlock(block, line);
-        return;
       }
-      if (!selected.length) return;
-      const line = lines.find(l => l.id === selected[0].id);
-      if (line) applyLineToBlock(block, line);
     }
   });
 }
@@ -1317,14 +1332,14 @@ function maybeExplainWarnings() {
 }
 
 /** Если позиция по приговору известна по всем эпизодам — генерируем секцию автоматически. */
-async function maybeAutoAdmission({ silent } = {}) {
+async function maybeAutoAdmission({ silent, deferred } = {}) {
   if (!state.structure || !state.structure.some(p => p.kind === 'admission')) return false;
   if (state.blocks.some(b => (b.section || 'defense') === 'admission')) return false;
   const eps = state.card.episodes;
   if (!eps.length || !eps.every(ep => ep.admission)) return false;
 
   await think('Формирую позицию по приговору', 1200);
-  await insertSectionBlock('admission', composeAdmissionText(), { section: 'admission', kind: 'admission' });
+  await insertSectionBlock('admission', composeAdmissionText(), { section: 'admission', kind: 'admission', deferred });
   if (!silent) addMessage('assistant', 'Позиция по приговору заполнена автоматически по данным карточки дела.');
   return true;
 }
@@ -1565,16 +1580,11 @@ async function llmGenerateBlock(blockId) {
   }
 }
 
-/**
- * Вставка секции (судебный акт / обстоятельства / позиция): с нейронкой блок
- * появляется сразу с информативным плейсхолдером, текст подтягивается по готовности.
- */
-async function insertSectionBlock(kind, fallbackHtml, opts) {
-  const names = { verdict: 'описание судебного акта первой инстанции', facts: 'описание обстоятельств дела по фабуле', admission: 'позиция по приговору' };
-  if (typeof LLM === 'undefined' || !LLM.enabled()) {
-    return insertBlock(fallbackHtml, opts);
-  }
-  const id = insertBlock(pendingHtml(names[kind] || kind), opts);
+/** Отложенные генерации секций: blockId → {kind, fallbackHtml}; порядок задаёт generateInDocOrder. */
+const deferredSectionFills = new Map();
+
+/** Догенерация текста секции в уже вставленный pending-блок. */
+async function fillSectionBlock(id, kind, fallbackHtml) {
   const text = await generateSectionText(kind, fallbackHtml);
   const block = getBlock(id);
   if (block) {
@@ -1582,7 +1592,44 @@ async function insertSectionBlock(kind, fallbackHtml, opts) {
     renderBlocks();
     flashBlock(id);
   }
+}
+
+/**
+ * Вставка секции (судебный акт / обстоятельства / позиция): с нейронкой блок
+ * появляется сразу с информативным плейсхолдером, текст подтягивается по готовности.
+ * opts.deferred — только вставить плейсхолдер; текст сгенерит generateInDocOrder.
+ */
+async function insertSectionBlock(kind, fallbackHtml, opts) {
+  const names = { verdict: 'описание судебного акта первой инстанции', facts: 'описание обстоятельств дела по фабуле', admission: 'позиция по приговору' };
+  if (typeof LLM === 'undefined' || !LLM.enabled()) {
+    return insertBlock(fallbackHtml, opts);
+  }
+  const id = insertBlock(pendingHtml(names[kind] || kind), opts);
+  if (opts && opts.deferred) {
+    deferredSectionFills.set(id, { kind, fallbackHtml });
+    return id;
+  }
+  await fillSectionBlock(id, kind, fallbackHtml);
   return id;
+}
+
+/**
+ * Генерация текстов по порядку следования блоков в документе (сверху вниз):
+ * секции с отложенной генерацией и защитные блоки из lineBlockIds.
+ */
+async function generateInDocOrder(lineBlockIds = []) {
+  const order = state.structure
+    ? SECTION_ORDER.flatMap(sec => state.blocks.filter(b => (b.section || 'defense') === sec))
+    : [...state.blocks];
+  for (const b of order) {
+    const job = deferredSectionFills.get(b.id);
+    if (job) {
+      deferredSectionFills.delete(b.id);
+      await fillSectionBlock(b.id, job.kind, job.fallbackHtml);
+    } else if (lineBlockIds.includes(b.id)) {
+      await llmGenerateBlock(b.id);
+    }
+  }
 }
 
 /** Текстовое представление аргументов (в tree — вместе с их основаниями). */
@@ -2894,15 +2941,13 @@ async function runGenByLines() {
     state.boundLines.add(line.id);
     addPlea(line.plea || PLEA_FALLBACK);
   });
-  // с нейронкой текст каждого защитного блока генерится сразу, не заглушкой
-  for (const id of insertedIds) await llmGenerateBlock(id);
 
   // 17.3 Сутевая часть дела (фабула) — первым блоком после заголовка
   let factsAdded = false;
   if (state.card.episodes.length && !factsFilled()) {
     setStep('17.3');
     await think('Генерирую сутевую часть дела по фабуле', 1800);
-    await insertSectionBlock('facts', composeFactsText(), { atStart: true, section: 'facts', kind: 'facts' });
+    await insertSectionBlock('facts', composeFactsText(), { atStart: true, section: 'facts', kind: 'facts', deferred: true });
     if (!state.factsSource) state.factsSource = 'card';
     factsAdded = true;
   }
@@ -2911,11 +2956,14 @@ async function runGenByLines() {
   if (state.structure && state.structure.some(p => p.kind === 'verdict') && state.card.verdict
       && !state.blocks.some(b => (b.section || 'defense') === 'verdict')) {
     await think('Формирую описание приговора', 1400);
-    await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict' });
+    await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict', deferred: true });
   }
 
   // признание известно по карточке — заполняем автоматически (без отдельной отбивки)
-  await maybeAutoAdmission({ silent: true });
+  await maybeAutoAdmission({ silent: true, deferred: true });
+
+  // нейронка заполняет тексты по порядку следования блоков в документе (сверху вниз)
+  await generateInDocOrder(insertedIds);
 
   setStep('17.4');
   endScenario();
