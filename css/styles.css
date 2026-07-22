@@ -115,6 +115,33 @@ button {
   font-size: 11px;
   white-space: nowrap;
 }
+.demo-ai {
+  border: 1px solid #33363f;
+  border-radius: 999px;
+  color: #b9bdcb;
+  font-size: 11px;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+.demo-ai:hover { background: #23262e; }
+.demo-ai.is-on { border-color: #2eb872; color: #2eb872; }
+
+.ai-note { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #5b6270;
+}
+.ai-field input {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: none;
+}
+.ai-field input:focus { border-color: var(--accent); }
 
 /* ============ Шапка ============ */
 .topbar {
@@ -931,7 +958,11 @@ body.text-only .doc-block__head { display: none !important; }
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  border-radius: 7px;
+  padding: 2px 7px;
+  cursor: pointer;
 }
+.check-item:hover { background: #eef0f4; }
 .check-item svg { width: 15px; height: 15px; flex: none; }
 .check-item--done { color: #1d7a4b; }
 .check-item--warn { color: #9a6b00; }
