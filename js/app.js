@@ -413,10 +413,10 @@ function scrollToNeedyArg(block) {
 
 let spState = null;
 
-function openSitePicker({ title, context, items, addable, addFields, applyLabel, hint, single, onApply, onAdd }) {
+function openSitePicker({ title, context, items, addable, addFields, applyLabel, hint, single, onApply, onAdd, startId }) {
   spState = {
     items: items.map(it => ({ ...it })),
-    current: 0,
+    current: startId != null ? Math.max(0, items.findIndex(it => it.id === startId)) : 0,
     single: !!single,
     onApply
   };
@@ -638,9 +638,10 @@ function pickCircumstanceGround(block, onApply) {
 
 /**
  * Выбор линии защиты для нового пустого блока: первый шаг — линии карточки дела,
- * «+ Добавить» открывает библиотеку всех линий (дерево УПК) для создания новой.
+ * «+ Добавить» открывает библиотеку всех линий (дерево УПК); выбранная там линия
+ * попадает в этот список доступных (preselectId) и применяется отсюда.
  */
-function openLinePicker(block) {
+function openLinePicker(block, preselectId) {
   const lines = state.card.lines;
 
   openSitePicker({
@@ -650,11 +651,12 @@ function openLinePicker(block) {
     addable: true,
     onAdd: () => openLineLibraryPicker(block),
     applyLabel: 'Применить',
+    startId: preselectId,
     items: lines.map(l => ({
       id: l.id,
       title: shortLineTitle(l.title),
       sub: 'карточка дела' + (l.thesis ? ' · ' + l.thesis.slice(0, 50) : ''),
-      checked: false,
+      checked: l.id === preselectId,
       fields: [
         ['Линия защиты', shortLineTitle(l.title)],
         ['Тезис', l.thesis || '—'],
@@ -710,8 +712,8 @@ function openLineLibraryPicker(block) {
           plea: null
         };
         state.card.lines.push(line);
-        addMessage('assistant', `Линия «${line.title}» взята из библиотеки — нормативка по дереву УПК подтянута в карточку.`);
-        applyLineToBlock(block, line);
+        addMessage('assistant', `Линия «${line.title}» добавлена в список из библиотеки — нормативка по дереву УПК подтянута в карточку.`);
+        openLinePicker(block, line.id);
         return;
       }
       // своя линия, введённая вручную
@@ -729,7 +731,7 @@ function openLineLibraryPicker(block) {
         };
         state.card.lines.push(line);
         addMessage('assistant', `Создана новая линия защиты: «${a.title}» — сохранена в карточку дела.`);
-        applyLineToBlock(block, line);
+        openLinePicker(block, line.id);
       }
     }
   });
