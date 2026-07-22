@@ -10,10 +10,13 @@
  * Без ключа демо работает как раньше — на шаблонных текстах.
  */
 
+// миграция: старый дефолт заменяем на nano
+if (localStorage.getItem('llm_model') === 'gpt-4o-mini') localStorage.removeItem('llm_model');
+
 const LLM = {
   get key() { return localStorage.getItem('llm_key') || ''; },
   get url() { return localStorage.getItem('llm_url') || 'https://api.openai.com/v1/chat/completions'; },
-  get model() { return localStorage.getItem('llm_model') || 'gpt-4o-mini'; },
+  get model() { return localStorage.getItem('llm_model') || 'gpt-5-nano'; },
 
   save({ key, url, model }) {
     if (key !== undefined) localStorage.setItem('llm_key', key.trim());
@@ -29,21 +32,28 @@ const LLM = {
 
   /** Один запрос: system + user, возвращает текст ответа. */
   async complete(userPrompt, { temperature = 0.3, maxTokens = 1600 } = {}) {
+    // gpt-5-* и o-* принимают max_completion_tokens и не принимают temperature ≠ 1
+    const reasoning = /^(gpt-5|o\d)/.test(this.model);
+    const body = {
+      model: this.model,
+      messages: [
+        { role: 'system', content: PROMPTS.system },
+        { role: 'user', content: userPrompt }
+      ]
+    };
+    if (reasoning) {
+      body.max_completion_tokens = maxTokens;
+    } else {
+      body.temperature = temperature;
+      body.max_tokens = maxTokens;
+    }
     const r = await fetch(this.url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + this.key
       },
-      body: JSON.stringify({
-        model: this.model,
-        temperature,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: PROMPTS.system },
-          { role: 'user', content: userPrompt }
-        ]
-      })
+      body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error('LLM HTTP ' + r.status);
     const j = await r.json();
