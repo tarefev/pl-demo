@@ -1503,6 +1503,10 @@ function blockPromptVars(block) {
   const practice = (block.selectedPractice || []).map(i => pool[i]).filter(Boolean)
     .map(p => `${p.num} (${p.court}) — ${p.decision || p.result}`).join('\n') || '—';
 
+  // предыдущая редакция текста блока (плейсхолдер генерации не считается текстом)
+  const prevText = stripTags(block.generated || '').replace(/\s+/g, ' ').trim();
+  const previousText = prevText && !prevText.includes('Генерируется нейросетью') ? prevText : '—';
+
   return {
     docType: state.docType ? state.docType.label : 'процессуальный документ',
     lineTitle: shortLineTitle(line.title || ''),
@@ -1511,7 +1515,8 @@ function blockPromptVars(block) {
     normsWithTexts,
     practice,
     circumstances: state.card.circumstances.join('; ') || '—',
-    caseSummary: caseSummaryForPrompt()
+    caseSummary: caseSummaryForPrompt(),
+    previousText
   };
 }
 
@@ -1880,6 +1885,7 @@ async function editHeaderWithAI(text) {
         targetName: 'Шапка документа',
         userCommand: text,
         caseSummary: caseSummaryForPrompt(),
+        blockText: '—',
         currentText: docHeaderBodyEl.innerText.replace(/\s+/g, ' ').trim()
       })));
     docHeaderBodyEl.innerHTML = out.split(/\n+/).map(l => `<p>${l.trim()}</p>`).join('');
@@ -2278,6 +2284,7 @@ async function editSubpartWithAI(text) {
           targetName: `${block.label} · ${part.title}`,
           userCommand: text,
           caseSummary: caseSummaryForPrompt(),
+          blockText: stripTags(block.generated || '').replace(/\s+/g, ' ').trim() || '—',
           currentText: stripTags(part.html).replace(/\s+/g, ' ')
         })));
       part.html = out.replace(/\n{2,}/g, ' ').trim();
@@ -3238,15 +3245,36 @@ async function rewriteBlockAuto(block, mode) {
   addMessage('assistant', mode === 'shorter' ? 'Блок переписан короче.' : 'Блок переписан подробнее.');
 }
 
-/** 16.6 — редактирование блока с ИИ по свободному запросу. */
+/** 16.6 — редактирование блока с ИИ по свободному запросу (предыдущий текст — в контексте). */
 async function onRewriteBlock(block, request) {
-  await think('Редактирую блок согласно запросу', 1800);
-  if (block.parts && block.parts.length) {
-    block.generated = `${REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim()}`;
+  const isCtor = !!(block.parts && block.parts.length);
+  const currentText = stripTags(isCtor ? (block.generated || '') : (block.html || '')).replace(/\s+/g, ' ').trim();
+
+  if (typeof LLM !== 'undefined' && LLM.enabled()) {
+    try {
+      const out = await thinkWhile(`Анализирую запрос и редактирую текст ${labelGen(block.label)} нейросетью`, () =>
+        LLM.complete(fillPrompt(PROMPTS.editTarget, {
+          docType: state.docType ? state.docType.label : 'документ',
+          targetName: `${block.label} · текст блока`,
+          userCommand: request,
+          caseSummary: caseSummaryForPrompt(),
+          blockText: '—',
+          currentText: currentText || '—'
+        }), { maxTokens: 8000 }));
+      const html = out.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
+      if (isCtor) block.generated = html;
+      else { block.html = html; block.htmlBase = null; }
+    } catch (err) {
+      addMessage('assistant', `(ИИ недоступен: ${err.message} — применена шаблонная правка.)`);
+      if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
+      else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
+    }
   } else {
-    block.html = REGEN_FALLBACK_TEXT;
-    block.htmlBase = null;
+    await think('Редактирую блок согласно запросу', 1800);
+    if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
+    else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
   }
+
   renderBlocks();
   flashBlock(block.id);
   endScenario(`Текст ${labelGen(block.label)} отредактирован согласно вашему запросу.`);
