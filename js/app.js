@@ -348,6 +348,23 @@ function buildGroundsEl(block, arg) {
       renderBlocks();
     });
     g.appendChild(row);
+
+    // под доказательством — поле «что доказывает»: адвокат расписывает,
+    // что конкретно и почему подтверждает это доказательство
+    if (ground.type === 'evidence') {
+      const proves = document.createElement('div');
+      proves.className = 'doc-ground__proves';
+      proves.innerHTML = `
+        <span class="doc-ground__proves-label">Что доказывает</span>
+        <div class="doc-ground__proves-text" contenteditable="true"
+             data-ph="Опишите, что конкретно и почему подтверждает это доказательство">${ground.proves || ''}</div>`;
+      const pt = proves.querySelector('.doc-ground__proves-text');
+      pt.addEventListener('input', () => {
+        ground.proves = pt.innerText.trim();
+        markDirty(block, 'Аргументы и доводы', 'arguments');
+      });
+      g.appendChild(proves);
+    }
   });
 
   if (argOnlyPractice(arg)) {
@@ -390,7 +407,7 @@ function buildGroundsEl(block, arg) {
       }
       if (type === 'norm') pickNormGround(block, texts => texts.forEach(t => push({ type: 'norm', text: t })));
       if (type === 'practice') pickPracticeGround(block, texts => texts.forEach(t => push({ type: 'practice', text: t })));
-      if (type === 'evidence') pickEvidenceGround(block, texts => texts.forEach(t => push({ type: 'evidence', text: t })));
+      if (type === 'evidence') pickEvidenceGround(block, evs => evs.forEach(ev => push({ type: 'evidence', text: ev.text, proves: ev.proves })));
       if (type === 'circumstance') pickCircumstanceGround(block, texts => texts.forEach(t => push({ type: 'circumstance', text: t })));
     });
   });
@@ -613,12 +630,13 @@ function pickEvidenceGround(block, onApply) {
     })),
     onApply: (selected, added) => {
       added.forEach(a => state.card.evidence.push(a.title));
-      const withProves = it => {
-        const desc = it.id !== null && it.id !== undefined ? state.card.evidence[it.id] : it.title;
-        return desc + (it.proves ? ` — доказывает: ${it.proves}` : '');
-      };
-      const texts = [...selected, ...added].map(withProves);
-      if (texts.length) onApply(texts);
+      // «что доказывает» — отдельное поле основания (редактируется и в конструкторе)
+      const toGround = it => ({
+        text: it.id !== null && it.id !== undefined ? state.card.evidence[it.id] : it.title,
+        proves: it.proves || ''
+      });
+      const grounds = [...selected, ...added].map(toGround);
+      if (grounds.length) onApply(grounds);
     }
   });
 }
@@ -1554,7 +1572,10 @@ function caseSummaryForPrompt() {
 function blockPromptVars(block) {
   const line = state.card.lines.find(l => l.id === block.lineId) || {};
   const args = (block.argsList || []).map((a, i) => {
-    const gr = (a.grounds || []).map(g => `  - ${GROUND_LABELS[g.type] || g.type}: ${stripTags(g.text)}`).join('\n');
+    const gr = (a.grounds || []).map(g => {
+      const proves = g.proves ? ` (доказывает: ${stripTags(g.proves)})` : '';
+      return `  - ${GROUND_LABELS[g.type] || g.type}: ${stripTags(g.text)}${proves}`;
+    }).join('\n');
     return `${i + 1}. ${a.text}${gr ? '\n' + gr : ''}`;
   }).join('\n');
 
@@ -1696,7 +1717,7 @@ function argsListToHtml(argsList) {
     if (!t) return '';
     if (ARGS_MODE === 'tree' && a.grounds && a.grounds.length) {
       t += ` Это подтверждается: ${a.grounds.map(g =>
-        `${g.text}${g.evidence ? ' (' + g.evidence + ')' : ''}`).filter(Boolean).join('; ')}.`;
+        `${g.text}${g.evidence ? ' (' + g.evidence + ')' : ''}${g.proves ? ' — доказывает: ' + g.proves : ''}`).filter(Boolean).join('; ')}.`;
     }
     return t;
   }).filter(Boolean).join(' ');
@@ -1994,10 +2015,20 @@ docHeaderBodyEl.addEventListener('input', () => updateChecklist());
   setActiveBlock(HEADER_ID);
 }));
 
-/** Правка шапки по команде из чата (через нейронку; без неё — подсказка). */
+/** Правка шапки по команде из чата: с ИИ переписывает, без ИИ вносит запрос в текст шапки. */
 async function editHeaderWithAI(text) {
+  const flashHeader = () => {
+    const wrap = docHeaderBodyEl.closest('.doc-header');
+    wrap.classList.add('flash');
+    setTimeout(() => wrap.classList.remove('flash'), 1600);
+  };
+
   if (typeof LLM === 'undefined' || !LLM.enabled()) {
-    addMessage('assistant', '(Демо) Правка шапки по команде доступна с подключённой нейронкой (кнопка «ИИ» вверху) — либо отредактируйте шапку прямо в документе.');
+    await think('Вношу правку в шапку документа', 1200);
+    docHeaderBodyEl.innerHTML += `<p>Дополнительно учтено: ${text.trim().replace(/\s+/g, ' ').replace(/^./, c => c.toLowerCase()).replace(/\.?$/, '.')}</p>`;
+    flashHeader();
+    updateChecklist();
+    addMessage('assistant', 'Шапка документа обновлена с учётом вашего запроса.');
     return;
   }
   try {
@@ -2011,13 +2042,14 @@ async function editHeaderWithAI(text) {
         currentText: docHeaderBodyEl.innerText.replace(/\s+/g, ' ').trim()
       })));
     docHeaderBodyEl.innerHTML = out.split(/\n+/).map(l => `<p>${l.trim()}</p>`).join('');
-    const wrap = docHeaderBodyEl.closest('.doc-header');
-    wrap.classList.add('flash');
-    setTimeout(() => wrap.classList.remove('flash'), 1600);
+    flashHeader();
     updateChecklist();
     addMessage('assistant', 'Шапка документа обновлена согласно вашему запросу.');
   } catch (err) {
-    addMessage('assistant', `(ИИ недоступен: ${err.message} — шапка не изменена.)`);
+    addMessage('assistant', `(ИИ недоступен: ${err.message} — правка внесена без нейросети.)`);
+    docHeaderBodyEl.innerHTML += `<p>Дополнительно учтено: ${text.trim().replace(/\s+/g, ' ').replace(/^./, c => c.toLowerCase()).replace(/\.?$/, '.')}</p>`;
+    flashHeader();
+    updateChecklist();
   }
 }
 
@@ -2341,11 +2373,13 @@ async function routeText(text) {
   const trigger = matchTrigger(text);
   const sc = state.scenario;
 
-  // Сценарий не запущен (состояние C)
+  // Сценарий не запущен (состояние C): свободный ввод правит выбранную зону
   if (!sc) {
     if (trigger) return launchScenario(trigger);
     if (state.activeSubpart) return editSubpartWithAI(text);
     if (state.activeBlockId === HEADER_ID) return editHeaderWithAI(text);
+    const activeBlock = getBlock(state.activeBlockId);
+    if (activeBlock) return onRewriteBlock(activeBlock, text);
     return onFreeInput(text);
   }
 
@@ -2430,8 +2464,8 @@ async function editSubpartWithAI(text) {
 }
 
 async function onFreeInput(text) {
-  await think('Обрабатываю запрос', 1400);
-  addMessage('assistant', '(Демо) Свободный ввод вне сценариев отвечает заглушкой. Наберите «справка» — покажу доступные команды.');
+  await think('Обрабатываю запрос', 1000);
+  addMessage('assistant', 'Выберите зону в документе — блок, подблок или шапку, — и свободный текст применится к ней. Либо наберите «справка», чтобы увидеть команды.');
 }
 
 /* ================= Сценарий №1: стартовый (выбор типа документа) ================= */
@@ -3370,10 +3404,26 @@ async function rewriteBlockAuto(block, mode) {
   addMessage('assistant', mode === 'shorter' ? 'Блок переписан короче.' : 'Блок переписан подробнее.');
 }
 
-/** 16.6 — редактирование блока с ИИ по свободному запросу (предыдущий текст — в контексте). */
+/** Правка без нейросети: свободный запрос вносится прямо в текст блока (без заглушки). */
+function incorporateInstruction(rawHtml, currentText, request) {
+  const instr = request.trim().replace(/\s+/g, ' ');
+  if (!currentText) {
+    // пустой блок: запрос становится первичным текстом
+    return `<p>${capFirst(instr).replace(/\.?$/, '.')}</p>`;
+  }
+  const add = `${instr.charAt(0).toLowerCase()}${instr.slice(1).replace(/\.?$/, '.')}`;
+  return `${rawHtml}<p>Дополнительно учтено: ${add}</p>`;
+}
+
+/** 16.6 — правка блока по свободному запросу: с ИИ переписывает, без ИИ вносит запрос в текст. */
 async function onRewriteBlock(block, request) {
   const isCtor = !!(block.parts && block.parts.length);
-  const currentText = stripTags(isCtor ? (block.generated || '') : (block.html || '')).replace(/\s+/g, ' ').trim();
+  const rawHtml = isCtor ? (block.generated || '') : (block.html || '');
+  const currentText = stripTags(rawHtml).replace(/\s+/g, ' ').trim();
+  const setText = html => {
+    if (isCtor) block.generated = html;
+    else { block.html = html; block.htmlBase = null; }
+  };
 
   if (typeof LLM !== 'undefined' && LLM.enabled()) {
     try {
@@ -3386,34 +3436,20 @@ async function onRewriteBlock(block, request) {
           blockText: '—',
           currentText: currentText || '—'
         }), { maxTokens: 8000 }));
-      const html = out.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join('');
-      if (isCtor) block.generated = html;
-      else { block.html = html; block.htmlBase = null; }
+      setText(out.split(/\n{2,}/).map(p => `<p>${p.trim()}</p>`).join(''));
     } catch (err) {
-      // пустой блок заглушкой не забиваем — просим ввести текст вручную
-      if (!currentText) {
-        renderBlocks();
-        endScenario(`(ИИ недоступен: ${err.message}.) Блок пуст — введите текст прямо в документе, затем воспользуйтесь правкой с ИИ.`);
-        return;
-      }
-      addMessage('assistant', `(ИИ недоступен: ${err.message} — применена шаблонная правка.)`);
-      if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
-      else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
+      // без стоп-заглушки: вносим запрос в текст своими силами
+      addMessage('assistant', `(ИИ недоступен: ${err.message} — правка внесена без нейросети.)`);
+      setText(incorporateInstruction(rawHtml, currentText, request));
     }
   } else {
-    // без нейронки для пустого блока заглушку не вставляем
-    if (!currentText) {
-      endScenario('Правка с ИИ доступна после подключения нейронки (кнопка «ИИ» сверху). Введите текст блока прямо в документе.');
-      return;
-    }
-    await think('Редактирую блок согласно запросу', 1800);
-    if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
-    else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
+    await think('Вношу правку в текст блока', 1400);
+    setText(incorporateInstruction(rawHtml, currentText, request));
   }
 
   renderBlocks();
   flashBlock(block.id);
-  endScenario(`Текст ${labelGen(block.label)} отредактирован согласно вашему запросу.`);
+  endScenario(`Текст ${labelGen(block.label)} обновлён с учётом вашего запроса.`);
 }
 
 /* ---------- Модалки ---------- */

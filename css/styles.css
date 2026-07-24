@@ -634,6 +634,38 @@ body.text-only .doc-block__sticky { display: none !important; }
 .doc-ground__text { flex: 1; outline: none; line-height: 1.45; border-radius: 4px; }
 .doc-ground__text:focus { background: #e3e9fd; }
 .doc-ground__ev { color: var(--text-muted); }
+
+/* поле «что доказывает» под доказательством: адвокат расписывает суть */
+.doc-ground__proves {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 1px 0 3px 40px;
+  padding: 5px 9px;
+  background: #f0f9fb;
+  border-left: 2px solid #7fc7d1;
+  border-radius: 4px;
+}
+.doc-ground__proves-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #0e7787;
+}
+.doc-ground__proves-text {
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+  min-height: 1.2em;
+  color: var(--text);
+}
+.doc-ground__proves-text:empty::before {
+  content: attr(data-ph);
+  color: var(--text-muted);
+  font-style: italic;
+}
+.doc-ground__proves-text:focus { background: #fff; border-radius: 3px; }
 .doc-ground__warn {
   font-size: 11.5px;
   color: #9a6b00;
