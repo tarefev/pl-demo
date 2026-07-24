@@ -110,7 +110,7 @@ function resetDemo(tabIndex) {
 /* ================= Документ ================= */
 
 // позиция по приговору (admission) идёт сразу после описания судебного акта
-const SECTION_ORDER = ['verdict', 'admission', 'facts', 'law', 'defense'];
+const SECTION_ORDER = ['verdict', 'grounds', 'admission', 'facts', 'law', 'defense'];
 
 /** Короткое имя линии для панели блока. */
 const shortLineTitle = t => (t || '').replace(/^Линия \d+:\s*/, '').split(' — ')[0];
@@ -198,17 +198,26 @@ function buildBlockMeta(block) {
   return meta;
 }
 
+/** Ёмкий идентификатор эпизода: «по факту совершения…» вместо «эпизод N». */
+function episodeFact(ep) {
+  if (!ep) return '';
+  if (ep.fact) return ep.fact;
+  const d = (ep.title || '').replace(/^Эпизод\s*\d+\s*[—–-]\s*/, '').trim();
+  return d ? `по факту (${d})` : 'по эпизоду дела';
+}
+const capFirst = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 /** Короткая сводка блока для первой строки (по образу отчёта в чате). */
 function blockSummary(block) {
   const sec = block.section || 'defense';
   if (sec !== 'defense' || !(block.parts && block.parts.length)) {
-    const titles = { verdict: 'Описание судебного акта', facts: 'Обстоятельства дела', admission: 'Позиция по приговору', law: 'Правовое обоснование' };
+    const titles = { verdict: 'Описание судебного акта', grounds: 'Правовые основания (стандартные положения)', facts: 'Обстоятельства дела', admission: 'Позиция по приговору', law: 'Правовое обоснование' };
     return titles[sec] || 'Текстовый блок';
   }
   const line = state.card.lines.find(l => l.id === block.lineId) || null;
-  const ep = line && line.episodeId ? state.card.episodes.findIndex(x => x.id === line.episodeId) : -1;
+  const ep = line && line.episodeId ? state.card.episodes.find(x => x.id === line.episodeId) : null;
   const bits = [];
-  if (ep >= 0) bits.push(`Эпизод ${ep + 1}`);
+  if (ep) bits.push(capFirst(episodeFact(ep)));
   bits.push(line ? `Линия: ${shortLineTitle(line.title)}` : 'Линия не привязана');
   if (line && line.thesis) bits.push(`Тезис: ${line.thesis.split('. ')[0].slice(0, 60)}${line.thesis.length > 60 ? '…' : ''}`);
   bits.push(`Доказательств: ${(block.evidence || []).length}`);
@@ -1070,25 +1079,31 @@ function renderBlocks() {
       addMessage('assistant', `${dragged.label} перемещён.`);
     });
 
+    // шапка блока и панель кнопок липнут вместе при скролле длинного блока
+    const sticky = document.createElement('div');
+    sticky.className = 'doc-block__sticky';
+    sticky.contentEditable = 'false';
+    sticky.appendChild(head);
+    const meta = buildBlockMeta(block);
+    meta.classList.add('doc-block__meta--top');
+    sticky.appendChild(meta);
+
     if (isCtor) {
-      // конструкторный блок: сводка -> кнопки -> конструктор -> сгенерированный текст
+      // конструкторный блок: (шапка+кнопки, sticky) -> конструктор -> сгенерированный текст
       el.contentEditable = 'false';
-      el.appendChild(head);
-      const meta = buildBlockMeta(block);
-      meta.classList.add('doc-block__meta--top');
-      el.appendChild(meta);
+      el.appendChild(sticky);
       if (!block.constructorDone) el.appendChild(buildConstructor(block));
       el.appendChild(buildGenerated(block));
     } else {
-      el.contentEditable = 'true';
-      el.appendChild(head);
+      el.contentEditable = 'false';
+      el.appendChild(sticky);
       const content = document.createElement('div');
       content.className = 'doc-block__content';
+      content.contentEditable = 'true';
       content.innerHTML = block.html;
       el.appendChild(content);
-      el.appendChild(buildBlockMeta(block));
       // правки пользователя сохраняются в стейт и переживают перерисовку
-      el.addEventListener('input', () => {
+      content.addEventListener('input', () => {
         block.html = content.innerHTML;
         updateChecklist();
       });
@@ -1220,40 +1235,42 @@ const PH_ACTION_TITLES = {
   'law-own': 'Правовое обоснование своими словами'
 };
 
-/** Рамка-плейсхолдер секции. По наведению показывает кнопки (CSS). */
+/** Первичное действие вставки по разделу (без промежуточного выбора кнопок). */
+function placeholderPrimaryAct(kind) {
+  switch (kind) {
+    case 'verdict': return state.card.verdict ? 'verdict-card' : 'verdict-own';
+    case 'facts': return state.card.episodes.length ? 'facts-card' : 'facts-own';
+    case 'admission': return 'admission-fill';
+    case 'defense': return 'defense-add';
+    case 'law': return 'law-auto';
+  }
+  return null;
+}
+
+/** Рамка-плейсхолдер секции: клик по всей рамке вставляет блок (кнопок нет). */
 function buildPlaceholder(ph) {
   const el = document.createElement('div');
-  el.className = 'doc-ph';
+  el.className = 'doc-ph doc-ph--insert';
   el.dataset.kind = ph.kind;
 
-  let actionsHtml = '';
-  if (ph.kind === 'verdict') {
-    actionsHtml =
-      (state.card.verdict ? '<button data-act="verdict-card">Заполнить из карточки дела</button>' : '') +
-      '<button data-act="verdict-own">Заполнить своими словами</button>';
-  } else if (ph.kind === 'facts') {
-    actionsHtml =
-      (state.card.episodes.length ? '<button data-act="facts-card">Заполнить из карточки дела</button>' : '') +
-      '<button data-act="facts-verdict">Заполнить из приговора</button>' +
-      '<button data-act="facts-own">Заполнить своими словами</button>';
-  } else if (ph.kind === 'admission') {
-    actionsHtml = factsFilled()
-      ? '<button data-act="admission-fill">Заполнить по эпизодам</button>'
-      : '<span class="doc-ph__note">Сначала заполните обстоятельства дела</span>';
-  } else if (ph.kind === 'defense') {
-    actionsHtml = '<button data-act="defense-add">Добавить линию защиты</button>';
-  } else if (ph.kind === 'law') {
-    actionsHtml =
-      '<button data-act="law-auto">Подобрать нормы автоматически</button>' +
-      '<button data-act="law-own">Написать своими словами</button>';
-  }
+  const hints = {
+    verdict: state.card.verdict ? 'Вставить описание приговора из карточки дела' : 'Вставить блок и заполнить описание приговора',
+    facts: state.card.episodes.length ? 'Вставить обстоятельства дела из карточки' : 'Вставить блок и описать обстоятельства дела',
+    admission: 'Вставить позицию по приговору',
+    defense: 'Добавить линию защиты',
+    law: 'Вставить правовое обоснование'
+  };
+  const hint = hints[ph.kind] || 'Вставить блок';
 
   el.innerHTML = `
     <div class="doc-ph__title">${ph.title}</div>
-    <div class="doc-ph__actions">${actionsHtml}</div>`;
+    <div class="doc-ph__note">${hint} — нажмите, чтобы вставить. Правка с ИИ доступна после вставки блока.</div>
+    <span class="doc-ph__insert-ic" aria-hidden="true">+</span>`;
 
-  el.querySelectorAll('button[data-act]').forEach(btn =>
-    btn.addEventListener('click', () => onPlaceholderAction(btn.dataset.act)));
+  el.addEventListener('click', () => {
+    const act = placeholderPrimaryAct(ph.kind);
+    if (act) onPlaceholderAction(act);
+  });
   return el;
 }
 
@@ -1273,12 +1290,14 @@ async function runPlaceholderAction(act) {
     case 'verdict-card':
       await think('Формирую описание приговора', 1500);
       await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict' });
-      addMessage('assistant', 'Описание приговора заполнено из карточки дела.');
+      insertGroundsBlock();
+      addMessage('assistant', 'Описание приговора заполнено из карточки дела. Ниже добавлен стандартный блок правовых оснований (ст. 297, 302, 389.15 УПК РФ).');
       break;
 
     case 'verdict-own':
       insertBlock('<span class="ph-mark">Опишите приговор первой инстанции</span>', { atStart: true, section: 'verdict', kind: 'verdict-own' });
-      addMessage('assistant', 'Заполните описание приговора самостоятельно в документе.');
+      insertGroundsBlock();
+      addMessage('assistant', 'Заполните описание приговора самостоятельно в документе. Ниже добавлен стандартный блок правовых оснований.');
       break;
 
     case 'facts-card':
@@ -1346,18 +1365,45 @@ async function maybeAutoAdmission({ silent, deferred } = {}) {
   return true;
 }
 
-/** Блок «Позиция по приговору»: несогласие с приговором + позиция по эпизодам. */
+/** Категория признания по тексту статуса: deny / partial / admit / null (нет данных). */
+function admissionStance(adm) {
+  const a = (adm || '').toLowerCase();
+  if (!a) return null;
+  if (a.includes('частич')) return 'partial';
+  if (a.includes('не призна')) return 'deny';
+  if (a.includes('призна')) return 'admit';
+  return null;
+}
+
+/**
+ * Блок «Позиция по приговору»: короткая формулировка несогласия по каждому
+ * эпизоду с учётом статуса признания. Если данных о признании нигде нет —
+ * явно просим ввести позицию вручную.
+ */
 function composeAdmissionText() {
-  if (state.factsSource === 'own') {
-    return '<span class="ph-mark">Заполните позицию по приговору</span>';
-  }
+  const eps = state.card.episodes || [];
   const fromVerdict = state.factsSource === 'verdict';
-  const rows = state.card.episodes.map((ep, i) => {
-    const qual = ep.qualification || '<span class="ph-mark">указать квалификацию</span>';
-    const adm = ep.admission || (fromVerdict ? 'вину не признал' : '<span class="ph-mark">указать статус признания</span>');
-    return `по эпизоду ${i + 1} (${qual}) подзащитный ${adm}`;
-  }).join('; ');
-  return `С выводами суда первой инстанции сторона защиты не согласна: ${rows}. Изложенная в судебном заседании позиция подзащитного судом должным образом не оценена.`;
+  const known = state.factsSource !== 'own'
+    && (fromVerdict || eps.some(ep => admissionStance(ep.admission)));
+
+  if (!eps.length || !known) {
+    return '<p><span class="ph-mark">Информация о признании вины в карточке дела и приговоре не найдена — введите позицию по приговору вручную.</span></p>';
+  }
+
+  const rows = eps.map(ep => {
+    const fact = episodeFact(ep);
+    const qual = ep.qualification || '<span class="ph-mark">квалификация не указана</span>';
+    const stance = admissionStance(ep.admission) || (fromVerdict ? 'deny' : null);
+    if (stance === 'admit') {
+      return `сторона защиты, не оспаривая решение суда и причастность подзащитного к совершению преступления ${fact}, не согласна с назначенным наказанием по ${qual}`;
+    }
+    if (stance === 'partial') {
+      return `сторона защиты не согласна с решением суда в части квалификации содеянного ${fact} по ${qual}`;
+    }
+    return `сторона защиты не согласна с решением суда ${fact} и с квалификацией содеянного по ${qual}`;
+  });
+
+  return `<p>${rows.map(r => capFirst(r) + '.').join(' ')}</p>`;
 }
 
 /* ---------- Чеклист наполнения (строка состояния) ---------- */
@@ -1461,8 +1507,10 @@ const SRC_LABELS = {
 function defaultArgsList(line) {
   const pool = line.argumentsPool || [];
   if (!pool.length) {
-    const text = (line.argument || line.thesis || REGEN_FALLBACK_TEXT).replace(/\s+/g, ' ').trim();
-    return [{ text, source: 'fact', auto: true, poolIdx: null, grounds: [] }];
+    // у новой линии пула нет: сеем тезисом/аргументом, но НЕ заглушкой —
+    // если данных нет, аргументов нет (текст блока не будет шаблонным)
+    const seed = (line.argument || line.thesis || '').replace(/\s+/g, ' ').trim();
+    return seed ? [{ text: seed, source: 'fact', auto: true, poolIdx: null, grounds: [] }] : [];
   }
   return pool.slice(0, 2).map((a, i) => ({
     text: a.text, source: a.source, auto: true, poolIdx: i,
@@ -1493,7 +1541,7 @@ function blockLacksEvidence(block) {
 /** Короткая фактура дела для промтов. */
 function caseSummaryForPrompt() {
   const c = state.card;
-  const eps = c.episodes.map((e, i) => `Эпизод ${i + 1}: ${stripTags(e.text).replace(/\s+/g, ' ').slice(0, 260)} Позиция: ${e.admission || 'не указана'}.`).join('\n');
+  const eps = c.episodes.map((e) => `${capFirst(episodeFact(e))}: ${stripTags(e.text).replace(/\s+/g, ' ').slice(0, 260)} Позиция по признанию: ${e.admission || 'не указана'}.`).join('\n');
   return [
     c.client ? `Доверитель: ${c.client}.` : '',
     c.verdict ? `Судебный акт: приговор ${c.verdict.courtName} от ${c.verdict.date}, ${c.verdict.qualification}, наказание: ${c.verdict.sentence}.` : '',
@@ -1544,11 +1592,18 @@ function blockPromptVars(block) {
 async function generateSectionText(kind, fallbackHtml) {
   if (typeof LLM === 'undefined' || !LLM.enabled()) return fallbackHtml;
   const names = { verdict: 'Описание судебного акта первой инстанции', facts: 'Описание обстоятельств дела', admission: 'Позиция по приговору' };
+  // позиция по приговору — короткая (1–2 предложения); остальные секции — развёрнутее
+  const lengthHints = {
+    admission: 'Объём — 1–2 коротких предложения по существу, без вводных конструкций.',
+    verdict: 'Объём — 1–2 связных абзаца.',
+    facts: 'Объём — 1–3 связных абзаца.'
+  };
   try {
     const text = await thinkWhile(`Анализирую материалы дела и формирую раздел «${names[kind] || kind}» нейросетью`, () =>
       LLM.complete(fillPrompt(PROMPTS.generateSection, {
         sectionName: names[kind] || kind,
         docType: state.docType ? state.docType.label : 'документ',
+        lengthHint: lengthHints[kind] || 'Объём — 1–3 связных абзаца.',
         caseSummary: caseSummaryForPrompt(),
         sectionData: `Черновик раздела (можно опираться): ${stripTags(fallbackHtml).replace(/\s+/g, ' ')}`
       })));
@@ -1730,7 +1785,11 @@ function applyLineToBlock(block, line, { silent } = {}) {
   block.selectedPractice = state.card.practice && state.card.practice.length
     ? [0, 1].filter(i => state.card.practice[i]) : null;
   block.parts = buildLineParts(line, { argsList: block.argsList, selectedPractice: block.selectedPractice });
-  block.generated = generateFromParts(block.parts);
+  // с нейронкой — информативный плейсхолдер (текст догенерит llmGenerateBlock);
+  // без неё — сборка по фактуре; пустой результат оставляем пустым (без заглушки)
+  block.generated = (typeof LLM !== 'undefined' && LLM.enabled())
+    ? pendingHtml(`текст по линии «${shortLineTitle(line.title)}»`)
+    : generateFromParts(block.parts);
   block.evidence = block.evidence || [];
   block.dirty = false;
   block.dirtyNotified = false;
@@ -1797,6 +1856,17 @@ function composeVerdictText() {
     parts.push(c.appellateRuling || mark('Опишите апелляционное определение'));
   }
   return parts.map(p => `<p>${p}</p>`).join('');
+}
+
+/**
+ * Стандартный блок правовых оснований (ст. 297, 302, 389.15 УПК РФ и практика КС РФ) —
+ * фиксированный текст сразу после описания приговора для апелляции/кассации.
+ */
+function insertGroundsBlock() {
+  if (!state.docType || !['appeal', 'cassation'].includes(state.docType.key)) return;
+  if (!state.blocks.some(b => (b.section || 'defense') === 'verdict')) return; // только вместе с описанием приговора
+  if (state.blocks.some(b => (b.section || 'defense') === 'grounds')) return;   // уже есть
+  insertBlock(APPEAL_GROUNDS_HTML, { section: 'grounds', kind: 'grounds' });
 }
 
 /** Спец-идентификатор шапки документа в контексте чата. */
@@ -1888,9 +1958,12 @@ function generateHeaderLines(type) {
 
   if (type.court) {
     const court = c.court ? (type.key === 'appeal' ? c.court.appeal : c.court.cassation) : null;
+    // жалоба подаётся в вышестоящий суд ЧЕРЕЗ суд первой инстанции
+    const viaCourt = c.court && c.court.firstInstanceName;
+    const viaLine = viaCourt ? `через ${viaCourt}` : `через ${ph('вставить суд первой инстанции')}`;
     if (court) {
       // полные данные для шапки есть в карточке дела
-      const lines = [`В ${court.name}`, court.address, ''];
+      const lines = [`В ${court.name}`, viaLine, court.address, ''];
       lines.push(advLine);
       if (c.advocateDetails) lines.push(c.advocateDetails);
       lines.push('');
@@ -1899,7 +1972,7 @@ function generateHeaderLines(type) {
       if (c.court.firstInstanceRef) lines.push(`(${c.court.firstInstanceRef})`);
       return lines;
     }
-    return [`В ${ph('вставить название суда ' + type.court)}`, advLine, cliLine];
+    return [`В ${ph('вставить название суда ' + type.court)}`, viaLine, advLine, cliLine];
   }
   return [advLine, cliLine];
 }
@@ -2675,8 +2748,8 @@ async function createLine(episode, title, thesis) {
     id: `line-new-${state.card.lines.length + 1}`,
     episodeId: episode ? episode.id : null,
     title: title || 'Новая линия защиты (без названия)',
-    thesis: thesis || 'Тезис сформирован автоматически по материалам практики.',
-    argument: REGEN_FALLBACK_TEXT
+    thesis: thesis || 'Тезис сформирован автоматически по материалам практики.'
+    // без argument-заглушки: текст сгенерит нейросеть/сборка по тезису и аргументам
   };
   state.card.lines.push(line);
   addMessage('assistant', `Линия защиты сохранена в карточку дела: «${line.title}».`);
@@ -2773,8 +2846,8 @@ async function createLine6(episode, title, thesis) {
     id: `line-new-${state.card.lines.length + 1}`,
     episodeId: episode ? episode.id : null,
     title: title || 'Новая линия защиты (без названия)',
-    thesis: thesis || 'Тезис сформирован автоматически по материалам практики.',
-    argument: REGEN_FALLBACK_TEXT
+    thesis: thesis || 'Тезис сформирован автоматически по материалам практики.'
+    // без argument-заглушки: текст сгенерит нейросеть/сборка по тезису и аргументам
   };
   state.card.lines.push(line);
 
@@ -2960,6 +3033,8 @@ async function runGenByLines() {
     await think('Формирую описание приговора', 1400);
     await insertSectionBlock('verdict', composeVerdictText(), { atStart: true, section: 'verdict', kind: 'verdict', deferred: true });
   }
+  // стандартный блок правовых оснований сразу за описанием приговора
+  insertGroundsBlock();
 
   // признание известно по карточке — заполняем автоматически (без отдельной отбивки)
   await maybeAutoAdmission({ silent: true, deferred: true });
@@ -2996,10 +3071,10 @@ function composeFactsText() {
   const caseRef = c.court && c.court.caseNum ? ` № ${c.court.caseNum}` : '';
   const client = c.clientDat || c.client;
   const intro = `По уголовному делу${caseRef} моему доверителю${client ? ' ' + client : ''} вменяются следующие деяния.`;
-  const episodes = c.episodes.map((ep, i) => {
+  const episodes = c.episodes.map((ep) => {
     const text = ep.text.replace(/\s+/g, ' ').trim();
     const sentences = text.split('. ');
-    return `По эпизоду ${i + 1}: ${sentences.slice(0, 2).join('. ')}${sentences.length > 1 ? '.' : ''}`;
+    return `${capFirst(episodeFact(ep))}: ${sentences.slice(0, 2).join('. ')}${sentences.length > 1 ? '.' : ''}`;
   }).join(' ');
   return `${intro} ${episodes}`;
 }
@@ -3315,11 +3390,22 @@ async function onRewriteBlock(block, request) {
       if (isCtor) block.generated = html;
       else { block.html = html; block.htmlBase = null; }
     } catch (err) {
+      // пустой блок заглушкой не забиваем — просим ввести текст вручную
+      if (!currentText) {
+        renderBlocks();
+        endScenario(`(ИИ недоступен: ${err.message}.) Блок пуст — введите текст прямо в документе, затем воспользуйтесь правкой с ИИ.`);
+        return;
+      }
       addMessage('assistant', `(ИИ недоступен: ${err.message} — применена шаблонная правка.)`);
       if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
       else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
     }
   } else {
+    // без нейронки для пустого блока заглушку не вставляем
+    if (!currentText) {
+      endScenario('Правка с ИИ доступна после подключения нейронки (кнопка «ИИ» сверху). Введите текст блока прямо в документе.');
+      return;
+    }
     await think('Редактирую блок согласно запросу', 1800);
     if (isCtor) block.generated = REGEN_FALLBACK_TEXT.replace(/\s+/g, ' ').trim();
     else { block.html = REGEN_FALLBACK_TEXT; block.htmlBase = null; }
