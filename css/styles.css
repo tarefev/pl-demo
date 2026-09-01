@@ -13,7 +13,17 @@
   --danger: #e5484d;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(20, 24, 40, .07), 0 8px 24px rgba(20, 24, 40, .05);
+  /* три колонки: маргиналия с названием раздела и узкий столбец иконок действий */
+  --info-w: 150px;
+  /* правая колонка: иконки сеткой 2×2 (28px); удаление — в правом-нижнем углу */
+  --act-w: 74px;
+  --col-gap: 12px;
+  --info-col: calc(var(--info-w) + var(--col-gap));
+  --act-col: calc(var(--act-w) + var(--col-gap));
 }
+/* дефолт: описание слева, кнопки справа (у чата); переключалка меняет их местами */
+body.ctrl-right { --pad-l: var(--info-col); --pad-r: var(--act-col); }
+body.ctrl-left { --pad-l: var(--act-col); --pad-r: var(--info-col); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -217,18 +227,54 @@ button {
 .doc-scroll {
   flex: 1;
   overflow-y: auto;
+  /* горизонтального скролла у полотна не бывает — контент обязан ужиматься */
+  overflow-x: hidden;
   /* без верхнего паддинга: sticky-шапки блоков прилипают к самому верху,
-     прокрутка не просвечивает над ними */
-  padding: 0 40px 80px;
+     прокрутка не просвечивает над ними; боковые поля минимальные — колонки
+     и так отделяют текст от краёв, пустоты по бокам не нужны */
+  padding: 0 14px 80px;
 }
 
 .page {
-  max-width: 860px;
+  /* текст + колонки; при узком окне страница просто занимает доступную ширину */
+  max-width: calc(980px + var(--info-col) + var(--act-col));
   margin: 0 auto;
   position: relative;
   padding-top: 28px;
-  /* текст документа крупнее интерфейсного на 2 единицы */
-  font-size: 16px;
+  /* текст документа — как в подаваемых в суд документах: Times New Roman 14 pt */
+  font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+  font-size: 14pt;
+}
+
+/* интерфейсные элементы на полотне остаются в системном шрифте */
+.page__add-image, .doc-info, .doc-act, .doc-constructor, .doc-ph,
+.doc-hint, .doc-insert, .doc-add-block, .doc-empty, .doc-stale {
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+}
+
+/* абзацы внутри блока разделяются явно, как в напечатанном документе */
+.doc-block__content, .doc-generated__body { line-height: 1.6; }
+.doc-block__content p, .doc-generated__body p { margin: 0 0 14px; }
+.doc-block__content p:last-child, .doc-generated__body p:last-child { margin-bottom: 0; }
+
+/* добавленные на текущем шаге слова — маркер строго по тексту, без плашки
+   на весь абзац; пометка снимается со следующим шагом. Сиреневый: голубой
+   путался с выделением текста, жёлтый занят метками незаполненного */
+.doc-added {
+  background: #e6d9fa;
+  border-radius: 2px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* элементы вне блоков выравниваются по текстовой колонке (отступы под оба столбца) */
+.page > :not(#doc-blocks):not(#doc-pleas):not(#doc-tail),
+#doc-blocks > :not(.doc-block),
+#doc-tail > :not(.doc-block),
+#doc-pleas > * {
+  margin-left: var(--pad-l);
+  margin-right: var(--pad-r);
 }
 
 .page__add-image {
@@ -279,22 +325,27 @@ button {
 /* --- Заголовок документа --- */
 .doc-title {
   text-align: center;
-  font-size: 21px;
+  /* наименование документа — чуть крупнее текста, полужирным, с воздухом до текста */
+  font-size: 16pt;
   font-weight: 700;
-  margin: 6px 0 4px;
+  margin: 10px 0 22px;
   outline: none;
 }
 
-/* --- Блоки документа --- */
+/* --- Блоки документа: [описание] [текст со скобкой] [кнопки], без разделителей --- */
 .doc-block {
   position: relative;
-  padding: 16px 2px 18px;
-  border-bottom: 1px solid var(--border-strong);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--col-gap);
+  /* интервал между блоками — как между абзацами документа, не как между карточками */
+  padding: 1px 0 3px;
   line-height: 1.6;
   outline: none;
   cursor: text;
 }
-.doc-block:first-child { border-top: 1px solid var(--border-strong); }
+/* переключалка меняет края местами: кнопки слева, описание справа */
+body.ctrl-left .doc-block { flex-direction: row-reverse; }
 
 /* sticky-обёртка: метка и статус прилипают при скролле длинного блока */
 .doc-block__pin {
@@ -323,32 +374,62 @@ button {
 .doc-block:hover .doc-block__label,
 .doc-block.is-active .doc-block__label { opacity: 1; }
 
-.doc-block.is-active {
-  background: var(--accent-soft-2);
-  box-shadow: inset 2px 0 0 var(--accent);
+/**
+ * Тело блока: тонкая вертикальная полоса со стороны описания связывает абзац
+ * с колонками и одновременно показывает готовность блока (галок и меток нет):
+ * зелёная — всё заполнено, жёлтая — по сводке чего-то не хватает.
+ */
+.doc-block__body {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  padding-left: 14px;
 }
+/**
+ * Скобка на полях: вертикаль с короткими загибами внутрь сверху и снизу —
+ * очерчивает границы блока «отсюда и досюда», как разметка на бумаге.
+ * У коротких блоков (класс is-short ставится в renderBlocks) загибы убираются,
+ * иначе скобка выглядит рамкой-выделением.
+ */
+/* цвет скобки = индикация готовности блока */
+.doc-block { --bracket: var(--border-strong); }
+.doc-block.is-ok { --bracket: #2eb872; }
+.doc-block.is-warn { --bracket: var(--warn); }
 
-.doc-block__status {
+.doc-block__body::before {
+  content: "";
   position: absolute;
-  right: -28px;
-  top: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: none;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  color: #fff;
-  background: var(--warn);
-  cursor: pointer;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 4px;
+  border: 1.5px solid var(--bracket);
+  border-right: none;
+  border-radius: 2px 0 0 2px;
+  transition: border-color .15s;
 }
-.doc-block__status::before { content: "!"; }
-.doc-block__status.is-done { background: #2eb872; }
-.doc-block__status.is-done::before { content: "✓"; }
+/* короткий блок — без загибов, чтобы скобка не читалась рамкой-выделением */
+.doc-block.is-short .doc-block__body::before {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+}
+/* при переключении описание уходит вправо — скобка зеркалится вместе с ним */
+body.ctrl-left .doc-block__body { padding-left: 0; padding-right: 14px; }
+body.ctrl-left .doc-block__body::before {
+  left: auto;
+  right: 0;
+  border: 2px solid var(--bracket);
+  border-left: none;
+  border-radius: 0 3px 3px 0;
+}
+body.ctrl-left .doc-block.is-short .doc-block__body::before {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+}
+.doc-block.is-active .doc-block__body { background: var(--accent-soft-2); border-radius: 6px; }
+
+/* кружки-галочки и восклицательные метки не используются — статус даёт полоса */
+.doc-block__status { display: none !important; }
 
 .doc-block ol { padding-left: 22px; }
 .doc-block li { margin: 4px 0; }
@@ -369,7 +450,8 @@ button {
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  /* заголовки подблоков читаются как рубрики конструктора, а не как фон */
+  color: #5b6270;
   margin-bottom: 3px;
 }
 .doc-sub__body {
@@ -389,37 +471,157 @@ button {
   box-shadow: inset 0 0 0 1px #cdd7fb;
 }
 
-/* --- Итерация 9: шапка блока + панель кнопок прилипают вместе при скролле --- */
-.doc-block__sticky {
+/* --- ЛЕВАЯ колонка: описание блока (галка, номер, назначение) --- */
+.doc-info {
+  flex: 0 0 var(--info-w);
+  width: var(--info-w);
   position: sticky;
-  top: 0;
-  z-index: 6;
-  background: #fff;
-  padding-bottom: 6px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.doc-block.is-active .doc-block__sticky { background: var(--accent-soft-2); }
-
-/* строка сводки блока (номер, сводка, иконки) */
-.doc-block__head {
+  top: 4px;
+  align-self: flex-start;
   display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0 0;
   cursor: default;
+  font-size: 13px;
 }
-.doc-block__grip {
-  flex: none;
-  color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: -1px;
+.doc-info__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/**
+ * Маргиналия: постоянно видно только короткое название раздела — мелко,
+ * светло-серым, прижато к тексту документа. Детали блока (эпизод, тезис,
+ * счётчики) раскрываются только у активного или наведённого блока.
+ */
+.doc-info__title {
+  flex: 1;
+  min-width: 0;
+  /* вес вместо размера: заметный якорь при прокрутке, но текст служебный */
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #5b6270;
+  text-align: left;
+  transition: color .15s;
+  /* за название блок перетаскивается — отдельной ручки нет */
   cursor: grab;
-  padding: 2px 3px;
-  border-radius: 5px;
   user-select: none;
 }
-.doc-block__grip:hover { background: #eef0f4; color: #5b6270; }
+.doc-info__title:active { cursor: grabbing; }
+.doc-block:hover .doc-info__title { color: #3a4050; }
+/* активный блок — акцентом: видно, с чем сейчас работаешь (это про фокус, не про статус) */
+.doc-block.is-active .doc-info__title { color: var(--accent); }
+
+/**
+ * Метка «Не хватает доказательств» — единственный сигнал в маргиналии.
+ * Видна всегда, пока проблема есть; жёлтый — тот же, что у полосы блока
+ * и подсветки аргумента, к которому она ведёт по клику.
+ */
+.doc-info__alert {
+  width: 100%;
+  margin-top: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 7px;
+  background: #fdf3e0;
+  color: #9a6b00;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: left;
+}
+.doc-info__alert:hover { background: #fae9c8; }
+
+/* эпизод — ярлык привязки: показывается целиком, с переносом */
+.doc-info__episode {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #6b7280;
+}
+/* Тезис — суть блока: показывается целиком, без обрезки и раскрытий */
+.doc-info__thesis {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid #d7dae3;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #2b3040;
+}
+/* при колонке кнопок слева описание уходит вправо — прижимаем к тексту слева */
+body.ctrl-left .doc-info__row { flex-direction: row-reverse; }
+
+/* --- ПРАВАЯ колонка: кнопки действий с подписями (контекст читается сразу) --- */
+.doc-act {
+  flex: 0 0 var(--act-w);
+  width: var(--act-w);
+  position: sticky;
+  top: 4px;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 2px 0 0;
+  cursor: default;
+}
+/**
+ * Иконки — сеткой 2×2, равные ячейки, иконка по центру: ровные зазоры и
+ * выравнивание по столбцам. Частые действия сверху (конструктор · ИИ),
+ * реже/опасное снизу (перегенерация · удаление). Корзина — в правом-нижнем
+ * углу, самый «безопасный» угол для необратимого; отделена зазором сетки.
+ * У секций без конструктора остаётся один ряд: ИИ · удаление.
+ */
+.doc-act__row {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+}
+/* перегенерация: акцентная, пока конструктор не изменён — приглушена */
+.doc-act .doc-block__meta {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  gap: 4px;
+}
+.doc-act .doc-block__tools {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* кнопка действия: иконка + подпись, во всю ширину колонки */
+.act-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #e3e9fd;
+  background: var(--accent-soft-2);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+}
+.act-btn:hover { background: var(--accent-soft); }
+.act-btn svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+/* подпись переносится, а не обрезается — контекст виден целиком */
+.act-btn span { min-width: 0; }
+/* «Не хватает доказательств» — тот же жёлтый, что у полосы блока и подсветки аргумента */
+.act-btn--warn {
+  background: #fdf3e0;
+  border-color: var(--warn);
+  color: #9a6b00;
+  font-weight: 700;
+}
+.act-btn--warn:hover { background: #fae9c8; }
 .doc-block__num {
   flex: none;
   background: #6b7280;
@@ -438,29 +640,52 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* иконка-действие: без подложки, фон появляется при наведении */
 .head-ic {
   flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #5b6270;
+  background: none;
+  border: 1px solid transparent;
+  transition: background .15s, color .15s, border-color .15s, opacity .15s;
 }
 .head-ic:hover { background: #eef0f4; }
-.head-ic svg { width: 15px; height: 15px; transition: transform .15s; }
-.head-ic--del:hover { background: #fdf0f0; color: var(--danger); }
-.doc-block__head .doc-block__status {
-  position: static;
-  flex: none;
-  margin-left: 2px;
+.head-ic svg { width: 16px; height: 16px; transition: transform .15s; }
+/* удаление необратимо — в покое приглушено, проявляется при работе с блоком */
+.head-ic--del { opacity: .45; }
+.doc-block:hover .head-ic--del,
+.doc-block.is-active .head-ic--del { opacity: 1; }
+.head-ic--del:hover { background: #fdf0f0; border-color: #f5d5d5; color: var(--danger); }
+
+/* опорное действие блока — синим постоянно */
+.head-ic--ai { color: var(--accent); }
+.head-ic--ai:hover { background: var(--accent-soft-2); }
+/**
+ * Перегенерация — цвет как состояние: пока конструктор не тронут, кнопка
+ * приглушена и неактивна; после правок становится залитой синей — сама
+ * сообщает «текст устарел, обновите».
+ */
+.head-ic--regen {
+  color: #c9cede;
+  background: none;
+  cursor: default;
 }
+/* конструктор изменён — кнопка загорается и сама зовёт обновить текст */
+.head-ic--regen.is-on {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  cursor: pointer;
+}
+.head-ic--regen.is-on:hover { background: #2f49d1; }
 .doc-block.is-dragging { opacity: .45; }
 .doc-block.is-drop-target { box-shadow: inset 0 3px 0 var(--accent); }
 .doc-block__content { outline: none; }
-
-body.text-only .doc-block__sticky { display: none !important; }
 
 /* Подподблоки аргументов */
 .doc-args {
@@ -509,23 +734,21 @@ body.text-only .doc-block__sticky { display: none !important; }
   color: var(--text-muted);
   font-style: italic;
 }
+/* откуда подобран довод: спокойный бейдж, подробности — в подсказке */
 .doc-arg__src {
   flex: none;
   font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--accent);
-  background: var(--accent-soft-2);
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: #6b7280;
+  background: #f1f2f6;
   border-radius: 5px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   margin-top: 2px;
   white-space: nowrap;
+  cursor: help;
 }
-.doc-arg__src--manual {
-  color: var(--text-muted);
-  background: #f1f2f6;
-}
+.doc-arg__src--manual { color: var(--text-muted); }
 .doc-arg__del {
   flex: none;
   width: 20px;
@@ -574,21 +797,46 @@ body.text-only .doc-block__sticky { display: none !important; }
   line-height: 1.5;
 }
 
+/* группа оснований: вертикаль-связка от довода вниз, у каждой строки — усик */
 .doc-arg__grounds {
+  position: relative;
   margin: -2px 0 2px 26px;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  border-left: 2px solid #e3e9fd;
-  padding-left: 10px;
+  border-left: 1px solid #d7dae3;
+  padding-left: 12px;
 }
 .doc-arg__grounds.is-collapsed { display: none; }
+/* подпись группы: связь «довод → чем подтверждается» проговорена словом */
+.doc-grounds__cap {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  /* на ступень светлее рубрик подблоков — это подпись внутри довода */
+  color: #6b7280;
+  margin-bottom: 1px;
+}
 .doc-ground {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 7px;
   font-size: 12px;
+  cursor: default;
 }
+/* усик-связка к вертикали группы */
+.doc-ground::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 10px;
+  width: 8px;
+  height: 1px;
+  background: #d7dae3;
+}
+/* ярлык типа: нейтральный, чтобы девять оснований не пестрили */
 .doc-ground__type {
   flex: none;
   font-size: 9.5px;
@@ -597,28 +845,25 @@ body.text-only .doc-block__sticky { display: none !important; }
   border-radius: 4px;
   padding: 2px 6px;
   margin-top: 1px;
+  background: #f1f2f6;
+  color: #6b7280;
 }
-.doc-ground__type--fact { background: #e8f7ef; color: #1d7a4b; }
-.doc-ground__type--norm { background: var(--accent-soft); color: var(--accent); }
-.doc-ground__type--practice { background: #f3ecfd; color: #7c4dbe; }
+/* цветом выделен только тот тип, вокруг которого идёт работа — доказательство */
 .doc-ground__type--evidence { background: #e6f6f8; color: #0e7787; }
-.doc-ground__type--circumstance { background: #fdf3e0; color: #9a6b00; }
-.doc-ground { cursor: default; }
 .doc-ground.is-dragging { opacity: .5; }
 .doc-ground.is-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
 .doc-ground__type { cursor: grab; }
 
-/* аргумент без доказательства */
-.doc-arg--needs-ev { border-color: #f0ddb0; background: #fffdf6; }
+/* довод без доказательства — подсвечен сам довод; у него же выделен путь к исправлению */
+.doc-arg--needs-ev { border-color: var(--warn); background: #fdf3e0; }
+.doc-arg--needs-ev + .doc-arg__grounds .ev-split button[data-gt="evidence"] {
+  border-style: solid;
+  border-color: var(--warn);
+  color: #9a6b00;
+}
 
 /* сплит-кнопка «+ Доказательство | не нужны» */
 .ev-split { display: inline-flex; }
-.ev-split.is-hot button[data-gt="evidence"] {
-  border-color: #f0b429;
-  color: #9a6b00;
-  background: #fdf3e0;
-  border-style: solid;
-}
 .ev-split__skip {
   display: none;
   font-size: 10.5px;
@@ -634,38 +879,43 @@ body.text-only .doc-block__sticky { display: none !important; }
 .doc-ground__text { flex: 1; outline: none; line-height: 1.45; border-radius: 4px; }
 .doc-ground__text:focus { background: #e3e9fd; }
 .doc-ground__ev { color: var(--text-muted); }
-
-/* поле «что доказывает» под доказательством: адвокат расписывает суть */
+/* поле «что доказывает» — под доказательством, заполняет адвокат */
+.doc-ground { flex-wrap: wrap; }
 .doc-ground__proves {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 1px 0 3px 40px;
-  padding: 5px 9px;
-  background: #f0f9fb;
-  border-left: 2px solid #7fc7d1;
+  flex-basis: 100%;
+  margin: 4px 0 2px 10px;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #0e6473;
+  background: #f2fafb;
+  border: 1px solid #cfe8ec;
+  border-left: 2px solid #0e7787;
   border-radius: 4px;
-}
-.doc-ground__proves-label {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: #0e7787;
-}
-.doc-ground__proves-text {
-  font-size: 12px;
-  line-height: 1.45;
   outline: none;
-  min-height: 1.2em;
-  color: var(--text);
 }
-.doc-ground__proves-text:empty::before {
+.doc-ground__proves:focus { background: #eaf7f9; }
+.doc-ground__proves:empty::before {
   content: attr(data-ph);
   color: var(--text-muted);
   font-style: italic;
 }
-.doc-ground__proves-text:focus { background: #fff; border-radius: 3px; }
+/**
+ * Пока не заполнено — свёрнуто в строку-приглашение, но не бесследно:
+ * связка «доказательство → что подтверждает» суду нужна, поэтому пробел
+ * помечен пунктиром и значком, только мягче, чем нехватка доказательств.
+ */
+.doc-ground__proves.is-empty {
+  padding: 1px 0 1px 10px;
+  background: none;
+  border: none;
+  border-left: 1px dashed var(--warn);
+  color: #9a6b00;
+  font-size: 11px;
+  opacity: .75;
+}
+.doc-ground__proves.is-empty:hover { opacity: 1; border-left-color: #0e7787; color: #0e7787; }
+.doc-ground__proves.is-empty:empty::before { content: "⌁ " attr(data-ph); font-style: normal; color: inherit; }
 .doc-ground__warn {
   font-size: 11.5px;
   color: #9a6b00;
@@ -673,7 +923,7 @@ body.text-only .doc-block__sticky { display: none !important; }
   border-radius: 6px;
   padding: 4px 8px;
 }
-.doc-ground__add { display: flex; gap: 5px; }
+.doc-ground__add { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .doc-ground__add button {
   font-size: 10.5px;
   color: var(--text-muted);
@@ -682,6 +932,74 @@ body.text-only .doc-block__sticky { display: none !important; }
   padding: 2px 8px;
 }
 .doc-ground__add button:hover { color: var(--accent); border-color: var(--accent); }
+
+/* «+ Основание»: типы (норма, практика, обстоятельство) раскрываются по клику,
+   чтобы у каждого довода не стояло четыре кнопки подряд */
+.gr-add { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.gr-add__types { display: none; gap: 5px; align-items: center; }
+.gr-add.is-open .gr-add__types { display: inline-flex; }
+/* норму можно вписать с клавиатуры, не открывая окно выбора */
+.gr-add__quick {
+  font: inherit;
+  font-size: 10.5px;
+  width: 210px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  outline: none;
+  color: var(--text);
+}
+.gr-add__quick:focus { border-color: var(--accent); }
+.gr-add__quick::placeholder { color: var(--text-muted); }
+.gr-add.is-open .gr-add__toggle { color: var(--accent); border-color: var(--accent); border-style: solid; }
+.gr-add__types button { border-style: solid; }
+
+/**
+ * «Текст блока не соответствует конструктору» — на границе конструктора и текста,
+ * чтобы правка состава не осталась незамеченной в готовом документе.
+ */
+.doc-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: #fdf3e0;
+  color: #9a6b00;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.doc-stale button {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 7px;
+  padding: 4px 10px;
+}
+.doc-stale button:hover { background: #2f49d1; }
+
+/* заголовок подблока доводов + «свернуть/развернуть все» */
+.doc-sub__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.doc-sub__head .doc-sub__title { margin-bottom: 0; }
+.doc-sub__foldall {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.doc-sub__foldall:hover { color: var(--accent); background: var(--accent-soft-2); }
 
 /* группы в модалке аргументов */
 .args-group { display: flex; flex-direction: column; gap: 8px; }
@@ -718,8 +1036,9 @@ body.text-only .doc-block__sticky { display: none !important; }
   font-style: italic;
 }
 
-/* Сгенерированный текст под конструктором */
-.doc-generated {
+/* Сгенерированный текст: отделяется линией только от открытого конструктора */
+.doc-generated { margin-top: 0; padding-top: 0; border-top: none; }
+.doc-constructor + .doc-generated {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px dashed var(--border);
@@ -788,28 +1107,7 @@ body.text-only .doc-block__sticky { display: none !important; }
   flex-wrap: wrap;
   gap: 5px;
 }
-.doc-block__tools button {
-  font-size: 11.5px;
-  color: var(--accent);
-  background: var(--accent-soft-2);
-  border: 1px solid #e3e9fd;
-  border-radius: 7px;
-  padding: 3px 9px;
-}
-.doc-block__tools button:hover { background: var(--accent-soft); }
-.doc-block__tools .meta-btn--warn {
-  background: #fdf3e0;
-  border-color: #f0ddb0;
-  color: #9a6b00;
-}
-.doc-block__tools .meta-btn--warn::before { content: "⚠ "; }
-.doc-block__tools .meta-btn--warn:hover { background: #fae9c8; }
-.doc-block__tools .meta-btn--line {
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* стили кнопок блока живут в .act-btn (см. колонку действий) */
 .modal-sub { color: var(--text-muted); }
 .modal__context {
   margin: 6px 18px 0;
@@ -830,25 +1128,6 @@ body.text-only .doc-block__sticky { display: none !important; }
   font-style: italic;
 }
 
-.doc-block__tools .meta-regen {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 700;
-}
-.doc-block__tools .meta-regen:hover { background: #2f49d1; }
-.doc-block__tools .meta-regen:disabled {
-  opacity: .4;
-  cursor: default;
-  background: var(--accent);
-}
-/* при закрытом конструкторе скрываем, но резервируем место — кнопка-тогглер не прыгает */
-.doc-block__tools .meta-regen.is-hidden { visibility: hidden; }
-/* фиксированная ширина тогглера: подпись меняется, геометрия — нет */
-.doc-block__tools [data-special="ctor-toggle"] {
-  min-width: 212px;
-  text-align: center;
-}
 
 /* Ховер-звёздочка действий у блока */
 .doc-block__star {
@@ -949,48 +1228,14 @@ body.text-only .doc-block__sticky { display: none !important; }
   color: #5b6270;
 }
 .doc-ph:hover .doc-ph__title { color: var(--accent); }
-.doc-ph__actions {
-  display: none;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-.doc-ph:hover .doc-ph__actions { display: flex; }
-.doc-ph__actions button {
-  padding: 7px 12px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12.5px;
-}
-.doc-ph__actions button:hover { background: #e2e8fd; }
+/* плейсхолдер-«кнопка»: весь блок кликабелен и сразу вставляет секцию */
+.doc-ph--click { cursor: pointer; }
 .doc-ph__note {
   color: var(--text-muted);
   font-size: 12.5px;
-  align-self: center;
+  margin-top: 6px;
 }
-
-/* плейсхолдер-вставка: клик по всей рамке вставляет блок (кнопок нет) */
-.doc-ph--insert { cursor: pointer; position: relative; }
-.doc-ph--insert .doc-ph__note { display: block; margin-top: 5px; }
-.doc-ph__insert-ic {
-  position: absolute;
-  top: 11px;
-  right: 14px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
-  opacity: 0;
-  transition: opacity .15s;
-}
-.doc-ph--insert:hover .doc-ph__insert-ic { opacity: 1; }
+.doc-ph--click:hover .doc-ph__note { color: var(--accent); }
 
 /* просительная часть: рамка без интерактива, подпись видна сразу */
 .doc-ph--static:hover { border-color: var(--border-strong); background: transparent; }
@@ -1037,7 +1282,7 @@ body.text-only .doc-block__sticky { display: none !important; }
 /* --- Точки вставки нового блока (итерация 4) --- */
 .doc-insert {
   position: relative;
-  height: 12px;
+  height: 6px;
 }
 .doc-insert__line {
   position: absolute;
@@ -1075,7 +1320,8 @@ body.text-only .doc-block__sticky { display: none !important; }
 
 .doc-add-block {
   display: block;
-  width: 100%;
+  /* на всю ширину текстовой колонки: сдвиги под столбцы компенсируются шириной */
+  width: calc(100% - var(--pad-l) - var(--pad-r));
   margin: 10px 0 4px;
   padding: 9px;
   border: 1px dashed var(--border-strong);
@@ -1252,20 +1498,13 @@ body.text-only .doc-add-block { display: none !important; }
   50% { opacity: 1; }
 }
 
-/* графический «!» внутри сообщения чата — как значок у блоков */
+/* «жёлтая» в тексте чата — подсветка под цвет полосы-индикатора у блоков */
 .msg-warn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--warn);
-  color: #fff;
-  font-size: 10px;
+  color: #9a6b00;
+  background: #fdf3e0;
+  border-radius: 4px;
+  padding: 0 5px;
   font-weight: 700;
-  vertical-align: -2px;
-  margin: 0 2px;
 }
 
 .msg--demo {
@@ -1803,19 +2042,14 @@ body.text-only .doc-add-block { display: none !important; }
 .send-btn:disabled { background: #c9cede; cursor: default; }
 .send-btn svg { width: 17px; height: 17px; }
 
-/* ============ Режим «только текст документа» ============ */
-.text-only-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  font-size: 12px;
-  color: #5b6270;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
+/* ============ Тумблер вида (тулбар): колонки блоков / только текст ============ */
+/* прижат к правому краю тулбара; нажатое состояние — акцентная заливка */
+.view-toggle { margin-left: auto; }
+.view-toggle.is-on {
+  background: var(--accent-soft-2);
+  color: var(--accent);
 }
-.text-only-toggle input { accent-color: var(--accent); }
+.view-toggle.is-on:hover { background: var(--accent-soft); }
 
 body.text-only .doc-constructor,
 body.text-only .doc-block__meta,
@@ -1828,14 +2062,22 @@ body.text-only .doc-hint,
 body.text-only .doc-empty,
 body.text-only .page__add-image { display: none !important; }
 
-body.text-only .doc-block {
-  border-bottom: none;
-  padding: 8px 2px;
-}
-body.text-only .doc-block:first-child { border-top: none; }
-body.text-only .doc-block.is-active {
+/* только текст: столбец управления и скобки скрыты, текст на всю ширину */
+body.text-only { --pad-l: 0px; --pad-r: 0px; }
+body.text-only .doc-info,
+body.text-only .doc-act { display: none !important; }
+body.text-only .doc-block { padding: 8px 0; }
+body.text-only .doc-block__body { padding-left: 0 !important; padding-right: 0 !important; }
+body.text-only .doc-block__body::before { display: none; }
+body.text-only .doc-block.is-active .doc-block__body {
   background: transparent;
   box-shadow: none;
+}
+body.text-only .page > *,
+body.text-only #doc-blocks > *,
+body.text-only #doc-pleas > * {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 body.text-only .doc-generated {
   border-top: none;
@@ -1863,4 +2105,493 @@ body.text-only .doc-generated {
   .doc-scroll { padding: 20px 24px 60px; }
   .doc-block__status { right: -20px; }
   .doc-block__star { right: -21px; }
+}
+
+/* ============ Визард ходатайств ============ */
+
+.mw-step {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.mw-q { font-weight: 700; margin-bottom: 6px; }
+.mw-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+.mw-link {
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* группы двухуровневого списка */
+.mw-groups { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mw-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.mw-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #3a4050;
+  text-align: left;
+}
+.mw-group__head:hover { background: var(--accent-soft-2); }
+.mw-group__count {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: #f1f2f6;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.mw-group__note {
+  font-size: 11.5px;
+  color: #9a6b00;
+  background: #fdf3e0;
+  padding: 5px 12px;
+}
+.mw-group__body { display: none; padding: 6px 10px 10px; flex-direction: column; gap: 4px; }
+.mw-group.is-open .mw-group__body { display: flex; }
+
+.mw-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  background: #fff;
+}
+.mw-item:hover { border-color: var(--accent); background: var(--accent-soft-2); color: var(--accent); }
+.mw-item:disabled { opacity: .45; cursor: default; }
+.mw-item.is-picked { border-color: var(--accent); background: var(--accent); color: #fff; opacity: 1; }
+.mw-item__norm { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+.mw-item.is-picked .mw-item__norm { color: #dbe2ff; }
+
+/* чекбоксы */
+.mw-multi { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.mw-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  background: #fff;
+}
+.mw-check:hover { border-color: #c9d4fb; }
+.mw-check.is-on { border-color: var(--accent); background: var(--accent-soft-2); }
+.mw-check input { accent-color: var(--accent); margin-top: 2px; flex: none; }
+.mw-all {
+  align-self: flex-start;
+  font-size: 10.5px;
+  color: var(--accent);
+  border: 1px dashed #c9d4fb;
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-bottom: 2px;
+}
+.mw-all:hover { background: var(--accent-soft-2); }
+
+/* корзина выбранного */
+.mw-basket {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fbfbfd;
+  margin-bottom: 6px;
+}
+.mw-basket__title { font-size: 11px; font-weight: 700; color: #5b6270; margin-bottom: 5px; }
+.mw-basket__empty { font-size: 11.5px; color: var(--text-muted); }
+.mw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  background: var(--accent-soft-2);
+  border: 1px solid #e3e9fd;
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 2px 4px 2px 9px;
+  margin: 0 4px 4px 0;
+}
+.mw-chip button { color: var(--accent); font-size: 13px; line-height: 1; padding: 0 3px; }
+.mw-chip button:hover { color: var(--danger); }
+
+/* поля и формы */
+.mw-text { margin: 8px 0; }
+.mw-input {
+  min-height: 68px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  background: #fff;
+}
+.mw-input:focus { border-color: var(--accent); }
+.mw-input:empty::before { content: attr(data-ph); color: var(--text-muted); font-style: italic; }
+
+.mw-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.mw-field { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: #5b6270; }
+.mw-field input, .mw-field select {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  background: #fff;
+}
+.mw-field input:focus, .mw-field select:focus { border-color: var(--accent); }
+
+.mw-evidence { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.mw-confirm { margin: 8px 0; }
+
+/* кнопки шага */
+.mw-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.mw-ok {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  padding: 7px 16px;
+  margin-top: 8px;
+}
+.mw-ok:hover { background: #2f49d1; }
+.mw-ok:disabled { opacity: .45; cursor: default; }
+.mw-actions .mw-ok { margin-top: 0; }
+.mw-add {
+  font-size: 12.5px;
+  color: var(--accent);
+  background: var(--accent-soft-2);
+  border: 1px solid #e3e9fd;
+  border-radius: 8px;
+  padding: 7px 12px;
+}
+.mw-add:hover { background: var(--accent-soft); }
+.mw-add:disabled { opacity: .45; cursor: default; }
+
+/* предупреждения-предохранители */
+.mw-warn {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: #fdf3e0;
+  color: #9a6b00;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* предпросмотр */
+.mw-preview__title { font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+.mw-preview__doc {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.mw-preview__doc p { margin-bottom: 8px; }
+.mw-preview__doc ol { padding-left: 20px; margin-bottom: 8px; }
+.mw-preview__doc li { margin: 4px 0; }
+.mw-preview__plea { margin-top: 10px; }
+
+.mw-check-list {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #fbfbfd;
+}
+.mw-check-list__title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #5b6270; margin-bottom: 5px; }
+.mw-cl { font-size: 12px; line-height: 1.5; }
+.mw-cl.is-ok { color: #1d7a4b; }
+.mw-cl.is-gap { color: #9a6b00; font-weight: 700; }
+.mw-cl__note { font-size: 11.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; }
+.mw-note { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.5; }
+
+/* шапка шага визарда: счётчик слева, «Назад» справа */
+.mw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mw-head .mw-step { margin-bottom: 0; }
+.mw-back {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.mw-back:hover { color: var(--accent); background: var(--accent-soft-2); }
+.mw-back:disabled { opacity: .4; cursor: default; }
+
+/* дата и подпись под ходатайством */
+.mw-sign { margin-top: 14px; }
+
+/* --- Шаг «Квалификация»: варианты переквалификации с тезисом и доводами в чате --- */
+.mw-req__sub { font-weight: 700; font-size: 13px; margin: 12px 0 2px; }
+.mw-var {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  margin-top: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.mw-var__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.mw-var__head:hover { background: var(--accent-soft-2); }
+.mw-var__head:disabled { cursor: default; }
+.mw-var__to { font-weight: 700; font-size: 13px; }
+.mw-var__short { color: var(--text-muted); font-size: 12px; }
+.mw-var.is-open { border-color: var(--accent); }
+.mw-var.is-open .mw-var__head { background: var(--accent-soft); }
+.mw-var__body { display: none; padding: 10px 12px 12px; }
+.mw-var.is-open .mw-var__body { display: block; }
+.mw-var__cap {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  margin: 10px 0 4px;
+}
+.mw-var__cap:first-child { margin-top: 0; }
+.mw-thesis {
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+}
+.mw-arg { margin: 6px 0 10px; }
+/* отключённый довод гаснет, но остаётся на месте — можно вернуть */
+.mw-arg:has(> .mw-arg__row input:not(:checked)) { opacity: .45; }
+.mw-arg__row { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.mw-arg__row input { margin-top: 3px; flex: none; }
+.mw-arg__text { font-size: 13px; line-height: 1.5; outline: none; }
+.mw-arg__grounds { margin: 4px 0 0 24px; display: flex; flex-direction: column; gap: 3px; }
+.mw-gr { display: flex; gap: 6px; align-items: baseline; font-size: 12px; color: #4b5160; }
+.mw-gb {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: #f1f2f6;
+  color: #6b7280;
+}
+.mw-gb--evidence { background: #e6f6f8; color: #0e7787; }
+.mw-gb--norm { background: var(--accent-soft); color: var(--accent); }
+.mw-gb--practice { background: #eaf6ec; color: #2e7d43; }
+
+/* --- Шаг «обстоятельства по каждой причине» (недопустимость доказательства) --- */
+.mw-fr {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  background: var(--surface);
+}
+.mw-fr__reason { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+.mw-fr .mw-input { min-height: 40px; }
+.mw-fr__support { margin-top: 8px; transition: opacity .25s; }
+.mw-fr__support.is-dim { opacity: .45; }
+.mw-fr__support .mw-gr { margin-top: 3px; }
+
+/* свободный ввод внутри раздела двухуровневого списка */
+.mw-free {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-strong);
+}
+.mw-free input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.mw-free input:focus { border-color: var(--accent); }
+
+/* пометка необязательного поля в формах визарда */
+.mw-optional {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.mw-fr__actions { margin-top: 6px; }
+
+/* --- Конструктор в ходатайствах: редактируемые поля набираются TNR 12 pt, --- */
+/* управляющие подписи, бейджи и кнопки остаются в системном шрифте */
+.doc-block--motion-args .doc-constructor [contenteditable="true"] {
+  font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+  font-size: 12pt;
+  line-height: 1.5;
+}
+
+/* поля тома и листов у выбранного доказательства (мультивыбор) */
+.mw-evplace {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 8px 24px;
+}
+.mw-evplace input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.mw-evplace input:focus { border-color: var(--accent); }
+
+
+/* --- Подбор переквалификации по справочнику --- */
+.mw-var__note {
+  display: block;
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.mw-req__koap-cap {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #9a6b00;
+  margin: 12px 0 2px;
+}
+.mw-var--koap { border-style: dashed; }
+.mw-req__split { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mw-req__disclaimer {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 10px;
+}
+.mw-field input.is-invalid { border-color: var(--danger); }
+
+/* ================= Стенд вариантов навигации (pl-demo) ================= */
+
+/* родная кнопка «Готово» шага скрыта — её жмёт кнопка «Далее» */
+.mw-step-msg .mw-ok { display: none; }
+
+/* заголовок «Шаг N из M» над блоком шага */
+.step-head {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+/* кнопки «Назад/Далее»: вдвоём делят всю ширину, одна — занимает её целиком */
+#flow-nav { display: flex; gap: 10px; }
+#flow-nav button {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+#flow-nav button:hover { background: #2f49d1; }
+#flow-nav button[hidden] { display: none; }
+
+/* v2: кнопки в потоке ленты — под блоком активного шага */
+.mw-step-msg #flow-nav { margin-top: 14px; }
+
+/* док с кнопками внизу панели (v1, v3) — на месте убранного композера */
+#flow-dock {
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+#flow-dock[hidden], #flow-dock.is-offscreen { display: none; }
+
+/* v1: заголовок активного шага приклеен к верху панели */
+#flow-top {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+#flow-top[hidden] { display: none; }
+/* в ленте заголовок активного шага при этом не дублируем */
+body.flow-v1 .mw-step-msg.is-step-active .step-head { display: none; }
+
+/* v3: заголовки шагов липнут в ленте и сменяют друг друга при прокрутке */
+body.flow-v3 .mw-step-msg .step-head {
+  position: sticky;
+  top: -17px;               /* компенсирует верхний паддинг ленты */
+  z-index: 5;
+  background: var(--surface);
+  padding: 8px 10px;
+  margin: -8px -10px 8px;
+  border-bottom: 1px solid var(--border);
 }

@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Апелляционная жалоба — демо</title>
+  <title>Ходатайство — варианты навигации шагов</title>
   <!-- ?v= бампается при каждом пуше, чтобы браузер не держал старый кэш -->
-  <link rel="stylesheet" href="css/styles.css?v=2026-07-24-i9-2-ep">
+  <link rel="stylesheet" href="css/styles.css?v=pl-demo-1">
 </head>
 <body>
 
   <!-- ================= Демо: выбор расклада ================= -->
   <div class="demo-switcher">
-    <span class="demo-switcher__label">Демо · расклад:</span>
+    <span class="demo-switcher__label">Демо · вариант навигации:</span>
     <div class="demo-switcher__tabs" id="demo-switcher-tabs"></div>
     <span class="demo-switcher__hint">переключение полностью сбрасывает состояние</span>
     <button class="demo-ai" id="demo-ai" title="Подключение нейронки (ключ хранится только в этом браузере)">ИИ: выкл</button>
@@ -96,9 +96,9 @@
           <svg viewBox="0 0 24 24"><path d="m5 13 6-9h4l-4 16M3 21h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="m16 15 5 5m0-5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         </button>
 
-        <label class="text-only-toggle" title="Скрыть конструкторы и служебные элементы">
-          <input type="checkbox" id="text-only-cb"> Показать только текст документа
-        </label>
+        <button class="icon-btn view-toggle is-on" id="view-toggle" title="Показаны колонки блоков — нажмите, чтобы оставить только текст документа">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 4v16" stroke="currentColor" stroke-width="1.7"/></svg>
+        </button>
       </div>
 
       <!-- Чеклист наполнения структуры документа (строка состояния) -->
@@ -136,6 +136,9 @@
           <!-- Просительная часть: рендерится из js/app.js -->
           <div id="doc-pleas"></div>
 
+          <!-- Хвост документа после просительной части: приложение, дата и подпись -->
+          <div id="doc-tail"></div>
+
           <div class="doc-hint">shift + enter — создать новый блок</div>
 
         </div>
@@ -166,8 +169,8 @@
 
       </div>
 
-      <!-- Ввод -->
-      <div class="assistant-input" id="assistant-input">
+      <!-- Ввод: на стенде вариантов навигации скрыт (баннер сценария и композер) -->
+      <div class="assistant-input" id="assistant-input" hidden>
         <div class="scenario-banner" id="scenario-banner">
           <div class="scenario-banner__text">
             <div class="scenario-banner__label">Выполняется сценарий
@@ -217,10 +220,15 @@
     <div class="modal" id="modal"></div>
   </div>
 
-  <script src="js/lines-library.js?v=2026-07-24-i9-2-ep"></script>
-  <script src="js/prompts.js?v=2026-07-24-i9-2-ep"></script>
-  <script src="js/llm.js?v=2026-07-24-i9-2-ep"></script>
-  <script src="js/scenarios.js?v=2026-07-24-i9-2-ep"></script>
-  <script src="js/app.js?v=2026-07-24-i9-2-ep"></script>
+  <script src="js/lines-library.js?v=pl-demo-1"></script>
+  <script src="js/prompts.js?v=pl-demo-1"></script>
+  <script src="js/llm.js?v=pl-demo-1"></script>
+  <script src="js/scenarios.js?v=pl-demo-1"></script>
+  <script src="js/requalification-map.js?v=pl-demo-1"></script>
+  <script src="js/motions.js?v=pl-demo-1"></script>
+  <script src="js/motion-defs.js?v=pl-demo-1"></script>
+  <script src="js/motion-wizard.js?v=pl-demo-1"></script>
+  <script src="js/app.js?v=pl-demo-1"></script>
+  <script src="js/demo-flow.js?v=pl-demo-1"></script>
 </body>
 </html>
