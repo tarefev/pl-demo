@@ -17,7 +17,8 @@
 const FLOW_VARIANTS = [
   { key: 'v1', tab: '1 · Липкие шапка и кнопки', hint: 'Шаг приклеен к верху, кнопки — к низу; после последнего шага кнопки исчезают' },
   { key: 'v2', tab: '2 · Всё в ленте', hint: 'Заголовок шага и кнопки — обычные элементы ленты' },
-  { key: 'v3', tab: '3 · Шапка за прокруткой', hint: 'Заголовок липнет и меняется при прокрутке; кнопки прячутся, когда активный шаг не виден' }
+  { key: 'v3', tab: '3 · Шапка за прокруткой', hint: 'Заголовок липнет и меняется при прокрутке; кнопки прячутся, когда активный шаг не виден' },
+  { key: 'v4', tab: '4 · Активный у кнопок', hint: 'Сверху липнет заголовок видимого шага, внизу у кнопок — номер активного; кнопки не прячутся' }
 ];
 
 let flowVariant = 0;
@@ -45,6 +46,8 @@ flowNav.innerHTML = `
 
 const flowDock = document.createElement('div');
 flowDock.id = 'flow-dock';
+// v4: подпись активного шага живёт прямо над кнопками — кнопки влияют на него
+flowDock.innerHTML = '<div id="flow-dock-label" hidden></div>';
 assistantPane.appendChild(flowDock);
 
 const flowActive = () => flowSteps[flowSteps.length - 1] || null;
@@ -139,9 +142,12 @@ function updateFlowNav() {
     return;
   }
 
-  // текст заголовка активного шага (для липкого топ-бара v1)
+  // подпись активного шага: v1 — липкий топ-бар, v4 — над кнопками внизу
   flowTop.textContent = `Шаг ${a.n} из ${a.total}`;
   flowTop.hidden = v !== 'v1';
+  const dockLabel = document.getElementById('flow-dock-label');
+  dockLabel.textContent = `Шаг ${a.n} из ${a.total}`;
+  dockLabel.hidden = v !== 'v4';
 
   // «Назад» только со второго шага; одна кнопка занимает всю ширину.
   // Кнопки всегда включаем заново: обработчики «Готово» шагов гасят все
@@ -196,7 +202,7 @@ function startFlowDemo(variant) {
   flowSteps = [];
   flowCache = [];
   flowDone = false;
-  document.body.classList.remove('flow-v1', 'flow-v2', 'flow-v3');
+  document.body.classList.remove('flow-v1', 'flow-v2', 'flow-v3', 'flow-v4');
   document.body.classList.add('flow-' + FLOW_VARIANTS[variant].key);
 
   // состояние как в resetDemo, но без стартового сценария выбора типа

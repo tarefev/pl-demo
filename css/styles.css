@@ -2583,8 +2583,9 @@ body.text-only .doc-generated {
 }
 #flow-top[hidden] { display: none; }
 
-/* v3: заголовки шагов липнут в ленте и сменяют друг друга при прокрутке */
-body.flow-v3 .mw-step-msg .step-head {
+/* v3, v4: заголовки шагов липнут в ленте и сменяют друг друга при прокрутке */
+body.flow-v3 .mw-step-msg .step-head,
+body.flow-v4 .mw-step-msg .step-head {
   position: sticky;
   top: -17px;               /* компенсирует верхний паддинг ленты */
   z-index: 5;
@@ -2596,3 +2597,12 @@ body.flow-v3 .mw-step-msg .step-head {
 
 /* ответы пользователя в ленте не показываем — выбор и так виден в шагах */
 #assistant-feed .msg--user { display: none; }
+
+/* v4: номер активного шага прибит к низу — прямо над кнопками, на которые влияет */
+#flow-dock-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+#flow-dock-label[hidden] { display: none; }
