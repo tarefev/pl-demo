@@ -2592,3 +2592,6 @@ body.flow-v3 .mw-step-msg .step-head {
   margin: -8px -10px 8px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ответы пользователя в ленте не показываем — выбор и так виден в шагах */
+#assistant-feed .msg--user { display: none; }
