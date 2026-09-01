@@ -24,6 +24,9 @@ let flowVariant = 0;
 let flowSteps = [];        // [{ el, n, total }] — сообщения шагов в ленте
 let flowDone = false;      // визард завершён — управление исчезает
 let flowObserver = null;   // v3: следит, виден ли активный шаг
+// стёртые «Назад» шаги с их данными: если ответ предыдущего шага не менялся,
+// при «Далее» шаг восстанавливается с введёнными данными; поменялся — обнуляется
+let flowCache = [];        // [{ el, n, total, prevKey, prevAnswer }]
 
 /* ---------- DOM стенда: топ-бар, док с кнопками ---------- */
 
@@ -61,6 +64,24 @@ flowNav.querySelector('#flow-back').addEventListener('click', () => {
 /* ---------- Регистрация шагов (хук из mwRunStep) ---------- */
 
 function flowStepMounted(el, n, total) {
+  // «назад → ничего не менял → далее»: восстанавливаем стёртый шаг с данными;
+  // ответ предыдущего шага изменился — кэш обнуляется, шаг рендерится пустым
+  const cached = flowCache[flowCache.length - 1];
+  if (cached) {
+    const nowAnswer = JSON.stringify(mwCtx && mwCtx.answers[cached.prevKey]);
+    if (nowAnswer === cached.prevAnswer) {
+      flowCache.pop();
+      el.replaceWith(cached.el);
+      el = cached.el;
+      n = cached.n;
+      total = cached.total;
+      flowUnlock(el);
+      // шаги с живой сборкой подтягивают восстановленный текст в документ
+      el.querySelectorAll('.mw-input').forEach(i => i.dispatchEvent(new Event('input', { bubbles: true })));
+    } else {
+      flowCache = [];
+    }
+  }
   document.querySelectorAll('.mw-step-msg.is-step-active').forEach(x => x.classList.remove('is-step-active'));
   el.classList.add('is-step-active');
   flowSteps.push({ el, n, total });
@@ -70,7 +91,7 @@ function flowStepMounted(el, n, total) {
 /** Назад: активный шаг стирается из ленты, предпоследний снова активен. */
 function flowBack() {
   if (flowSteps.length < 2 || !mwCtx) return;
-  flowSteps.pop();
+  const cur = flowSteps.pop();
   const prev = flowActive();
   // стираем всё после сообщения предыдущего шага: ответ-пузырь, активный шаг, предупреждения
   while (prev.el.nextSibling) prev.el.nextSibling.remove();
@@ -80,6 +101,12 @@ function flowBack() {
   let i = mwCtx.step - 1;
   while (i >= 0 && steps[i].when && !steps[i].when(mwCtx)) i -= 1;
   if (i < 0) return;
+  // стёртый шаг сохраняем вместе с ответом предыдущего: не изменится — восстановим
+  flowCache.push({
+    el: cur.el, n: cur.n, total: cur.total,
+    prevKey: steps[i].key,
+    prevAnswer: JSON.stringify(mwCtx.answers[steps[i].key])
+  });
   delete mwCtx.answers[steps[i].key];
   mwCtx.step = i;
   mwSync();
@@ -87,7 +114,8 @@ function flowBack() {
   flowUnlock(prev.el);
   prev.el.classList.add('is-step-active');
   updateFlowNav();
-  smoothScrollFeedTo(prev.el);
+  // проматываем ленту к ставшему активным шагу
+  prev.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /** Разбудить погашенный шаг: контролы снова активны, выбор в них сохранён. */
@@ -95,12 +123,6 @@ function flowUnlock(msg) {
   msg.querySelectorAll('.mw-ok, .mw-add, .mw-item, .mw-all, .mw-choice, .mw-check input, .mw-field input, .mw-field select, .mw-chip button, .mw-free input')
     .forEach(x => { x.disabled = false; });
   msg.querySelectorAll('.mw-input, .mw-thesis, .mw-arg__text').forEach(x => { x.contentEditable = 'true'; });
-}
-
-/** Прокрутить ленту к элементу. */
-function smoothScrollFeedTo(el) {
-  const top = el.offsetTop - 12;
-  assistantScroll.scrollTo({ top, behavior: 'smooth' });
 }
 
 /* ---------- Раскладка «Назад/Далее» и заголовка по варианту ---------- */
@@ -121,7 +143,10 @@ function updateFlowNav() {
   flowTop.textContent = `Шаг ${a.n} из ${a.total}`;
   flowTop.hidden = v !== 'v1';
 
-  // «Назад» только со второго шага; одна кнопка занимает всю ширину
+  // «Назад» только со второго шага; одна кнопка занимает всю ширину.
+  // Кнопки всегда включаем заново: обработчики «Готово» шагов гасят все
+  // кнопки своего сообщения, а в v2 навигация лежит внутри него
+  flowNav.querySelectorAll('button').forEach(b => { b.disabled = false; });
   flowNav.querySelector('#flow-back').hidden = flowSteps.length < 2;
 
   if (v === 'v2') {
@@ -169,6 +194,7 @@ function renderVariantSwitcher() {
 function startFlowDemo(variant) {
   flowVariant = variant;
   flowSteps = [];
+  flowCache = [];
   flowDone = false;
   document.body.classList.remove('flow-v1', 'flow-v2', 'flow-v3');
   document.body.classList.add('flow-' + FLOW_VARIANTS[variant].key);
