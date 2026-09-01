@@ -2606,3 +2606,25 @@ body.flow-v4 .mw-step-msg .step-head {
   margin-bottom: 8px;
 }
 #flow-dock-label[hidden] { display: none; }
+
+/* v5: низ как в v4, серый «Шаг N из M» не липнет вовсе — обычный элемент ленты */
+
+/* v6: приклеиваются и серый номер шага, и название шага (двухэтажная липкая пара) */
+body.flow-v6 .mw-step-msg .step-head {
+  position: sticky;
+  top: -17px;
+  z-index: 6;
+  background: var(--surface);
+  padding: 8px 10px 2px;
+  margin: -8px -10px 0;
+  line-height: 14px;
+}
+body.flow-v6 .mw-step-msg .mw-q {
+  position: sticky;
+  top: 7px;
+  z-index: 6;
+  background: var(--surface);
+  padding: 2px 10px 8px;
+  margin: 0 -10px 10px;
+  border-bottom: 1px solid var(--border);
+}

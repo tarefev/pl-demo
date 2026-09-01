@@ -18,7 +18,9 @@ const FLOW_VARIANTS = [
   { key: 'v1', tab: '1 · Липкие шапка и кнопки', hint: 'Шаг приклеен к верху, кнопки — к низу; после последнего шага кнопки исчезают' },
   { key: 'v2', tab: '2 · Всё в ленте', hint: 'Заголовок шага и кнопки — обычные элементы ленты' },
   { key: 'v3', tab: '3 · Шапка за прокруткой', hint: 'Заголовок липнет и меняется при прокрутке; кнопки прячутся, когда активный шаг не виден' },
-  { key: 'v4', tab: '4 · Активный у кнопок', hint: 'Сверху липнет заголовок видимого шага, внизу у кнопок — номер активного; кнопки не прячутся' }
+  { key: 'v4', tab: '4 · Активный у кнопок', hint: 'Сверху липнет заголовок видимого шага, внизу у кнопок — номер активного; кнопки не прячутся' },
+  { key: 'v5', tab: '5 · Без липкой шапки', hint: 'Серый «Шаг N из M» не приклеивается — только в потоке ленты; внизу номер активного у кнопок' },
+  { key: 'v6', tab: '6 · Липнут шаг и название', hint: 'Приклеиваются и серый «Шаг N из M», и название шага; внизу номер активного у кнопок' }
 ];
 
 let flowVariant = 0;
@@ -147,7 +149,7 @@ function updateFlowNav() {
   flowTop.hidden = v !== 'v1';
   const dockLabel = document.getElementById('flow-dock-label');
   dockLabel.textContent = `Шаг ${a.n} из ${a.total}`;
-  dockLabel.hidden = v !== 'v4';
+  dockLabel.hidden = !(v === 'v4' || v === 'v5' || v === 'v6');
 
   // «Назад» только со второго шага; одна кнопка занимает всю ширину.
   // Кнопки всегда включаем заново: обработчики «Готово» шагов гасят все
@@ -202,7 +204,7 @@ function startFlowDemo(variant) {
   flowSteps = [];
   flowCache = [];
   flowDone = false;
-  document.body.classList.remove('flow-v1', 'flow-v2', 'flow-v3', 'flow-v4');
+  document.body.classList.remove('flow-v1', 'flow-v2', 'flow-v3', 'flow-v4', 'flow-v5', 'flow-v6');
   document.body.classList.add('flow-' + FLOW_VARIANTS[variant].key);
 
   // состояние как в resetDemo, но без стартового сценария выбора типа
