@@ -2570,16 +2570,15 @@ body.text-only .doc-generated {
 }
 #flow-dock[hidden], #flow-dock.is-offscreen { display: none; }
 
-/* v1: заголовок активного шага приклеен к верху панели */
+/* v1: шаг состояния приклеен к верху — ярче и крупнее подписи в ленте,
+   потому что это «где я нахожусь», а не подпись блока */
 #flow-top {
-  padding: 9px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--text-muted);
+  color: var(--accent);
 }
 #flow-top[hidden] { display: none; }
 
