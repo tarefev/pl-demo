@@ -2582,8 +2582,6 @@ body.text-only .doc-generated {
   color: var(--text-muted);
 }
 #flow-top[hidden] { display: none; }
-/* в ленте заголовок активного шага при этом не дублируем */
-body.flow-v1 .mw-step-msg.is-step-active .step-head { display: none; }
 
 /* v3: заголовки шагов липнут в ленте и сменяют друг друга при прокрутке */
 body.flow-v3 .mw-step-msg .step-head {
