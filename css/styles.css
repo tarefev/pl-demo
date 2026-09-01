@@ -2568,7 +2568,11 @@ body.text-only .doc-generated {
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
-#flow-dock[hidden], #flow-dock.is-offscreen { display: none; }
+#flow-dock[hidden] { display: none; }
+/* v3: кнопки исчезают мгновенно, без анимаций; место сохраняется,
+   чтобы лента не прыгала по высоте */
+#flow-dock.is-offscreen { visibility: hidden; transition: none; }
+#flow-dock.is-offscreen button { transition: none; }
 
 /* v1: шаг состояния приклеен к верху — ярче и крупнее подписи в ленте,
    потому что это «где я нахожусь», а не подпись блока */
